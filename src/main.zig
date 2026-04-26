@@ -3,13 +3,11 @@ const Io = std.Io;
 const print = std.debug.print;
 
 const gzig = @import("gzig");
-const reader = @import("encoder/reader.zig");
-const compressor = @import("encoder/compressor.zig");
+const encoder = @import("encoder/encoder.zig");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
-    const cwd = Io.Dir.cwd();
 
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len < 2) { // first arg is program name
@@ -17,25 +15,38 @@ pub fn main(init: std.process.Init) !void {
     }
     
     const file_path = args[1];
-    print("File: {s}\n", .{ file_path });
+    var compressor = encoder.Encoder{
+        .file_path = file_path
+    };
+    
+    try compressor.encode(io, gpa);
+}
 
-    const basename = std.fs.path.basename(file_path);
-    print("basename: {s}\n", .{basename});
-    
-    const filename = std.fs.path.stem(file_path);
-    print("filename: {s}\n", .{filename});
-    
-    var new_file_path: []u8 = undefined;
+const testing = std.testing;
 
-    const items = [_][]const u8{file_path, ".gz"};
-    new_file_path = try std.mem.join(gpa, "", &items);
+test "test encoder" {
+    const io = testing.io;
+    var compressor = encoder.Encoder{
+        .file_path = "src/tests/loremipsum.txt"
+    };
+    var input_buf: [1024]u8 = undefined;
+    const input_file = try Io.Dir.cwd().openFile(io, "src/tests/loremipsum.txt", .{});
+    const input_file_length = try input_file.length(io);
+    var input_file_reader = input_file.reader(io, &input_buf);
+    const input_content = try input_file_reader.interface.readAlloc(testing.allocator, input_file_length);
+    defer testing.allocator.free(input_content);
+    defer input_file.close(io);
+    try compressor.encode(io, testing.allocator);
     
-    defer gpa.free(new_file_path);
-    const file = try cwd.openFile(io, file_path, .{});
-    defer file.close(io);
+    var buffer: [std.compress.flate.max_window_len]u8 = undefined;
+    const file = try Io.Dir.cwd().openFile(io, "src/tests/loremipsum.txt.gz", .{});
+    var reader_buffer: [1024]u8 = undefined;
+    var reader = file.reader(io, &reader_buffer);
 
-    const output = try cwd.createFile(io, new_file_path, .{});
-    defer output.close(io);
-    
-    try compressor.encode(io, gpa, &file, &output);
+    var decompress = std.compress.flate.Decompress.init(&reader.interface, std.compress.flate.Container.gzip, &buffer);
+    const output = try decompress.reader.readAlloc(testing.allocator, input_file_length);
+    defer testing.allocator.free(output);
+    try Io.Dir.cwd().deleteFile(io, "src/tests/loremipsum.txt.gz");
+
+    try testing.expectEqualDeep(input_content, output);
 }
