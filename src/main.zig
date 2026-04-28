@@ -15,9 +15,7 @@ pub fn main(init: std.process.Init) !void {
     }
     
     const file_path = args[1];
-    var compressor = encoder.Encoder{
-        .file_path = file_path
-    };
+    var compressor = encoder.Encoder.init(file_path);
     
     try compressor.encode(io, gpa);
 }
@@ -29,9 +27,7 @@ const testing = std.testing;
 
 test "test encoding+decoding equals input file" {
     const io = testing.io;
-    var compressor = encoder.Encoder{
-        .file_path = "src/tests/loremipsum.txt"
-    };
+    var compressor = encoder.Encoder.init("src/tests/loremipsum.txt");
     var input_buf: [1024]u8 = undefined;
     const input_file = try Io.Dir.cwd().openFile(io, "./src/tests/loremipsum.txt", .{});
     const input_file_length = try input_file.length(io);
