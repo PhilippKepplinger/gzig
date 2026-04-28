@@ -8,7 +8,8 @@ pub const max_alphabet_symbol = 288;
 pub const eob_symbol = 256;
 pub const max_prefixcode_bits = 15;
 pub const distnace_code_bits = 5;
-const buf_size = 1024 * 1024; // 1 MiB
+
+const buf_size = 1024 * 64;
 
 pub const Encoder = struct {
     file_path: []const u8 = undefined,
@@ -39,8 +40,8 @@ pub const Encoder = struct {
         log.debug("Header: {X} {X} {X} {X} {X} {X} {X}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
         log.debug("Header: {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
         var header_bytes: [10]u8 = @bitCast(header);
-        var bit_writer = BitWriter{};
-        try bit_writer.writeBytes(header_bytes[0..], &self.writer.interface);
+        var bit_writer = BitWriter.init(&self.writer.interface);
+        try bit_writer.writeBytes(header_bytes[0..]);
         log.debug("0x{X}\n", .{ header_bytes });
         try self.writer.flush();
 
@@ -52,6 +53,7 @@ pub const Encoder = struct {
             if (read > 0) {
                 const chunk = read_buf[0..read]; // for when read < read_buf.len
                 self.crc32.update(chunk);
+                log.debug("block: {d}", .{chunk.len});
                 try self.storeFixed(chunk, self.reader.atEnd());
                 // try self.storeUncompressed(chunk, self.reader.atEnd());
             }
@@ -60,7 +62,7 @@ pub const Encoder = struct {
         const footer = try getFooter(self.crc32.final(), input_length);
         log.debug("CRC: 0x{X}, ISIZE: 0x{X}", .{ footer.crc32, footer.isize });
         var footer_bytes: [8]u8 = @bitCast(footer);
-        try bit_writer.writeBytes(footer_bytes[0..], &self.writer.interface);
+        try bit_writer.writeBytes(footer_bytes[0..]);
         try self.writer.flush();
     }
 
@@ -106,9 +108,9 @@ pub const Encoder = struct {
             .btype = 0x01, // fixed 01
         };
         
-        var bit_writer = BitWriter{};
-        try bit_writer.writeBit(block_header.bfinal, &self.writer.interface);
-        try bit_writer.writeBits(u2, block_header.btype, &self.writer.interface);
+        var bit_writer = BitWriter.init(&self.writer.interface);
+        try bit_writer.writeBit(block_header.bfinal);
+        try bit_writer.writeBits(u2, block_header.btype);
 
         // TODO apply LZSS length/distance encoding
         
@@ -116,15 +118,15 @@ pub const Encoder = struct {
         for (data) |literal| {
             if (literal < eob_symbol) {
                 const code = prefix_codes[literal];
-                try bit_writer.writeLength(code.code, code.length, &self.writer.interface);
+                try bit_writer.writeLength(code.code, code.length);
             }
             // TODO encode length/distance codes with offsets as prefix codes
         }
         
         // write EOB
         const eob = prefix_codes[eob_symbol];
-        try bit_writer.writeLength(eob.code, eob.length, &self.writer.interface);
-        try bit_writer.flush(&self.writer.interface);
+        try bit_writer.writeLength(eob.code, eob.length);
+        try bit_writer.flush();
     }
     
     fn getFooter(crc32: u32, input_length: usize) !GzFooter {
