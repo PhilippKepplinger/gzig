@@ -243,3 +243,24 @@ const PrefixCode = struct {
     length: u4,
     code: u16,
 };
+
+const testing = std.testing;
+test "test fixed prefix codes for block type 01" {
+    var code_lengths: [max_alphabet_symbol]u4 = undefined;
+    for (0..max_alphabet_symbol) |i| {
+        code_lengths[i] = try getFixedCodeLength(i);
+    }
+
+    const code_table = getFixedPrefixCodes(code_lengths);
+
+    try testing.expectEqual(48, code_table[0].code);
+    try testing.expectEqual(113, code_table[65].code);
+    try testing.expectEqual(191, code_table[143].code);
+    try testing.expectEqual(400, code_table[144].code);
+    try testing.expectEqual(400, code_table[144].code);
+    try testing.expectEqual(511, code_table[255].code);
+    try testing.expectEqual(0, code_table[256].code);
+    try testing.expectEqual(23, code_table[279].code);
+    try testing.expectEqual(192, code_table[280].code);
+    try testing.expectEqual(199, code_table[287].code);
+}

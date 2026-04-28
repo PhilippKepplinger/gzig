@@ -22,15 +22,18 @@ pub fn main(init: std.process.Init) !void {
     try compressor.encode(io, gpa);
 }
 
+// tests
+// ================================================== //
+
 const testing = std.testing;
 
-test "test encoder" {
+test "test encoding+decoding equals input file" {
     const io = testing.io;
     var compressor = encoder.Encoder{
         .file_path = "src/tests/loremipsum.txt"
     };
     var input_buf: [1024]u8 = undefined;
-    const input_file = try Io.Dir.cwd().openFile(io, "src/tests/loremipsum.txt", .{});
+    const input_file = try Io.Dir.cwd().openFile(io, "./src/tests/loremipsum.txt", .{});
     const input_file_length = try input_file.length(io);
     var input_file_reader = input_file.reader(io, &input_buf);
     const input_content = try input_file_reader.interface.readAlloc(testing.allocator, input_file_length);
@@ -51,22 +54,3 @@ test "test encoder" {
     try testing.expectEqualDeep(input_content, output);
 }
 
-test "test fixed prefix codes for block type 01" {
-    var code_lengths: [encoder.max_alphabet_symbol]u4 = undefined;
-    for (0..encoder.max_alphabet_symbol) |i| {
-        code_lengths[i] = try encoder.getFixedCodeLength(i);
-    }
-    
-    const code_table = encoder.getFixedPrefixCodes(code_lengths);
-
-    try testing.expectEqual(48, code_table[0].code);
-    try testing.expectEqual(113, code_table[65].code);
-    try testing.expectEqual(191, code_table[143].code);
-    try testing.expectEqual(400, code_table[144].code);
-    try testing.expectEqual(400, code_table[144].code);
-    try testing.expectEqual(511, code_table[255].code);
-    try testing.expectEqual(0, code_table[256].code);
-    try testing.expectEqual(23, code_table[279].code);
-    try testing.expectEqual(192, code_table[280].code);
-    try testing.expectEqual(199, code_table[287].code);
-}

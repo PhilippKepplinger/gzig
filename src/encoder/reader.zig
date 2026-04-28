@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 
 /// Reads the full content of the file.
 /// Probably not a good idea for large files
+/// @deprecated
 pub fn readFile(io: Io, allocator: Allocator, path: []const u8) ![]u8 {
     const file = try Io.Dir.openFileAbsolute(io, path, .{});
     defer file.close(io);
