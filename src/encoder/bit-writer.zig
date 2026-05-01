@@ -1,5 +1,7 @@
 const std = @import("std");
 
+/// The `BitWriter` allows to write single bits into an output `Io.Writer`.
+/// The bits are stored in a `u8` byte buffer and written once the buffer is full or `flush` is called.
 pub const BitWriter = struct {
     buffer: u8 = 0x0,
     bits: u3 = 0,
@@ -67,11 +69,14 @@ pub const BitWriter = struct {
         }
     }
     
+    // writes the buffer to the writer
     fn writeBuffer(self: *BitWriter) !void {
-        //std.log.debug("byte: {b:0>8} => 0x{X}", .{self.buffer, self.buffer});
         try self.writer.writeByte(self.buffer);
     }
 };
+
+// tests
+// ================================================================================================================== //
 
 test "writeBit" {
     var output_buffer: [1]u8 = undefined;
