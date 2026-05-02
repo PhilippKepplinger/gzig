@@ -149,7 +149,6 @@ pub const Packager = struct {
             }
         }
         
-        std.debug.print("\n", .{});
         // write EOB
         const eob = prefix_codes[eob_symbol];
         try self.bit_writer.writeLength(eob.code, eob.length);

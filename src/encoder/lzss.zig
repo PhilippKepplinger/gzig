@@ -51,11 +51,11 @@ pub const LZSS = struct {
             while (index >= 0 and self.candidate_indices.items.len > 0) {
                 const candidate_index = self.candidate_indices.items[index];
                 const candidate_literal = try self.buffer.getOffset(candidate_index);
-                //std.log.debug("check candidate: ({c}) at offset: {d}", .{candidate_literal, candidate_index});
+                std.log.debug("check candidate: ({c}) at offset: {d}", .{candidate_literal, candidate_index});
                 
                 // the candidate does not match anymore, remove it
                 if (candidate_literal != literal) {
-                    //std.log.debug("({c}) != ({c}) => remove", .{candidate_literal, literal});
+                    std.log.debug("({c}) != ({c}) => remove", .{candidate_literal, literal});
                     _ = self.candidate_indices.swapRemove(index);
                     if (best_removed == null or candidate_index < best_removed.?) {
                         best_removed = candidate_index;
@@ -168,7 +168,7 @@ pub const LZSS = struct {
         var consumed= try self.allocator.alloc(u8, len);
         @memcpy(consumed[0..len], self.current_search[0..len]);
         
-        // std.log.debug("emit: dist: {d}, len: {d}, consumed: {s}", .{distance, len, consumed});
+        std.log.debug("emit: dist: {d}, len: {d}, consumed: {s}", .{distance, len, consumed});
         
         return .{
             .match = .{

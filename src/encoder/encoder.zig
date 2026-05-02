@@ -15,49 +15,48 @@ pub const checkpoint_size: u16 = (read_buffer_size + 1) / 4; // 16384
 pub const lookahead_size: u16 = 258;
 
 pub const Encoder = struct {
-    file_path: []const u8,
+    io: Io,
+    allocator: Allocator,
     input: Io.File = undefined,
     reader: Io.File.Reader = undefined,
-    
     output: Io.File = undefined,
     writer: Io.File.Writer = undefined,
     bit_writer: BitWriter = undefined,
-    
     crc32: CRC32 = undefined,
 
-    pub fn init(file_path: []const u8) Encoder {
+    pub fn init(io: Io, allocator: Allocator) Encoder {
         return .{
-            .file_path = file_path
+            .io = io,
+            .allocator = allocator,
         };
     }
     
-    pub fn encode(self: *Encoder, io: Io, allocator: Allocator) !void {
+    pub fn encode(self: *Encoder, file_path: []const u8) !void {
         self.crc32 = .{};
-        self.input = try Io.Dir.cwd().openFile(io, self.file_path, .{});
-        defer self.input.close(io);
+        self.input = try Io.Dir.cwd().openFile(self.io, file_path, .{});
+        defer self.input.close(self.io);
         
-        self.output = try self.createOutputFile(io, allocator);
-        defer self.output.close(io);
+        self.output = try self.createOutputFile(file_path);
+        defer self.output.close(self.io);
 
         var output_buf: [read_buffer_size]u8 = undefined;
-        self.writer = self.output.writer(io, &output_buf);
+        self.writer = self.output.writer(self.io, &output_buf);
         self.bit_writer = BitWriter.init(&self.writer.interface);
 
         var reader_buf: [read_buffer_size]u8 = undefined;
-        self.reader = self.input.reader(io, &reader_buf);
+        self.reader = self.input.reader(self.io, &reader_buf);
 
         const header = model.GzHeader{};
-        log.debug("Header: {X} {X} {X} {X} {X} {X} {X}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
-        log.debug("Header: {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
+        log.info("Header: {X} {X} {X} {X} {X} {X} {X}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
+        log.info("Header: {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
         var header_bytes: [10]u8 = @bitCast(header);
         try self.bit_writer.writeBytes(header_bytes[0..]);
-        log.debug("0x{X}\n", .{ header_bytes });
         try self.bit_writer.flush();
 
-        var packager = try Packager.init(allocator, &self.bit_writer);
+        var packager = try Packager.init(self.allocator, &self.bit_writer);
         defer packager.deinit();
         var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
-        var lzss_encoder = try lzss.LZSS.init(allocator, &packager, &lzss_buffer);
+        var lzss_encoder = try lzss.LZSS.init(self.allocator, &packager, &lzss_buffer);
         
         // write blocks per block to file
         var read_buf: [read_buffer_size]u8 = undefined;
@@ -70,8 +69,7 @@ pub const Encoder = struct {
             if (bytes_read > 0) {
                 const read_chunk = read_buf[0..bytes_read]; // for when read < read_buf.len, usually at EOF
                 
-                std.log.debug("read new chunk from input file: {d}", .{bytes_read});
-                std.log.debug("========================================================", .{});
+                std.log.info("read new chunk from input file: {d}", .{bytes_read});
                 
                 for (read_chunk) |literal| {
                    try lzss_encoder.process(literal);
@@ -85,21 +83,21 @@ pub const Encoder = struct {
             }
         }
 
-        const input_length = try self.reader.file.length(io);
+        const input_length = try self.reader.file.length(self.io);
         const footer = try getFooter(self.crc32.final(), input_length);
-        log.debug("CRC: 0x{X}, ISIZE: 0x{X}", .{ footer.crc32, footer.isize });
+        log.info("CRC: 0x{X}, ISIZE: 0x{X}", .{ footer.crc32, footer.isize });
         var footer_bytes: [8]u8 = @bitCast(footer);
         try self.bit_writer.writeBytes(footer_bytes[0..]);
         try self.bit_writer.flush(); // empty the bit_writer buffer
         try self.writer.flush(); // flush data to output writer
     }
 
-    fn createOutputFile(self: *Encoder, io: Io, allocator: Allocator) !Io.File {
-        const items = [_][]const u8{self.file_path, ".gz"};
-        const new_file_path = try std.mem.join(allocator, "", &items);
-        defer allocator.free(new_file_path);
+    fn createOutputFile(self: *Encoder, file_path: []const u8) !Io.File {
+        const items = [_][]const u8{file_path, ".gz"};
+        const new_file_path = try std.mem.join(self.allocator, "", &items);
+        defer self.allocator.free(new_file_path);
         
-        return try Io.Dir.cwd().createFile(io, new_file_path, .{});
+        return try Io.Dir.cwd().createFile(self.io, new_file_path, .{});
     }
     
     fn getFooter(crc32: u32, input_length: usize) !model.GzFooter {
