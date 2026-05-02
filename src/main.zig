@@ -5,6 +5,10 @@ const print = std.debug.print;
 const gzig = @import("gzig");
 const encoder = @import("encoder/encoder.zig");
 
+pub const std_options: std.Options = .{
+    .log_level = .info,
+};
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
@@ -27,9 +31,11 @@ const testing = std.testing;
 
 test "test encoding+decoding equals input file" {
     const io = testing.io;
-    var compressor = encoder.Encoder.init("src/tests/loremipsum.txt");
+    const input_file_path = "src/tests/loremipsum.txt";
+    const output_file_path = "src/tests/loremipsum.txt.gz";
+    var compressor = encoder.Encoder.init(input_file_path);
     var input_buf: [1024]u8 = undefined;
-    const input_file = try Io.Dir.cwd().openFile(io, "./src/tests/loremipsum.txt", .{});
+    const input_file = try Io.Dir.cwd().openFile(io, input_file_path, .{});
     const input_file_length = try input_file.length(io);
     var input_file_reader = input_file.reader(io, &input_buf);
     const input_content = try input_file_reader.interface.readAlloc(testing.allocator, input_file_length);
@@ -38,14 +44,14 @@ test "test encoding+decoding equals input file" {
     try compressor.encode(io, testing.allocator);
     
     var buffer: [std.compress.flate.max_window_len]u8 = undefined;
-    const file = try Io.Dir.cwd().openFile(io, "src/tests/loremipsum.txt.gz", .{});
+    const file = try Io.Dir.cwd().openFile(io, output_file_path, .{});
     var reader_buffer: [1024]u8 = undefined;
     var reader = file.reader(io, &reader_buffer);
 
     var decompress = std.compress.flate.Decompress.init(&reader.interface, std.compress.flate.Container.gzip, &buffer);
     const output = try decompress.reader.readAlloc(testing.allocator, input_file_length);
     defer testing.allocator.free(output);
-    try Io.Dir.cwd().deleteFile(io, "src/tests/loremipsum.txt.gz");
+    try Io.Dir.cwd().deleteFile(io, output_file_path);
 
     try testing.expectEqualDeep(input_content, output);
 }

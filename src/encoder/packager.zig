@@ -5,6 +5,8 @@ const PrefixCodes = @import("prefix-codes.zig").PrefixCodes;
 
 pub const eob_symbol: u16 = 256;
 pub const max_uncompressed_length: u16 = std.math.maxInt(u16);
+pub const distance_code_bits: u8 = 5;
+
 
 /// The `Packager` keeps track of a slice of input data and an a list of LZSS encoded tokens.
 /// It can decided what block type matches best given the current LZSS data compared to the raw input.
@@ -43,8 +45,11 @@ pub const Packager = struct {
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
         // TODO decide block dynamically and over ranges of the data, not all at once
-        const btype: u2 = 0x00; 
+        const btype: u2 = 0x01; 
+        
         const tokens = self.lzss_stream.items;
+        
+        std.log.debug("package {d} tokens", .{self.lzss_stream.items.len});
         
         switch (btype) {
             0 => try self.storeUncompressed(tokens, is_last),
@@ -54,9 +59,15 @@ pub const Packager = struct {
             else => {
             }
         }
-        
+
+        // reset for new data to come in
         self.read = 0;
         self.lzss_stream.clearRetainingCapacity();
+        
+        if (is_last) {
+            // flush to byte align the data stream
+            try self.bit_writer.flush();
+        }
     }
 
     /// block type 00
@@ -80,6 +91,7 @@ pub const Packager = struct {
                 _ = try self.bit_writer.writeBits(u8, token.literal);
             } else {
                 _ = try self.bit_writer.writeBytes(token.match.consumed);
+                self.allocator.free(token.match.consumed);
             }
         }
     }
@@ -105,18 +117,39 @@ pub const Packager = struct {
         try self.bit_writer.writeBit(block_header.bfinal);
         try self.bit_writer.writeBits(u2, block_header.btype);
         
-        // write literals as codes
         for (tokens) |token| {
             if (token == .literal) {
+                std.log.debug("{c}", .{token.literal});
+                // write literals as prefix codes
                 if (token.literal < eob_symbol) {
                     const code = prefix_codes[token.literal];
+                    std.log.debug("write literal code: ({b:0>7})", .{code.code});
                     try self.bit_writer.writeLength(code.code, code.length);
                 }
             } else {
-                // TODO encode length/distance codes with offsets as prefix codes
+                std.log.debug("({d}:{d})", .{token.match.len, token.match.dist});
+                defer self.allocator.free(token.match.consumed); // this is not needed
+                
+                // write length part
+                const length_code = try PrefixCodes.getLengthCode(token.match.len);
+                const length_prefix_code = prefix_codes[length_code.code];
+                std.log.debug("write length code: ({b:0>7}), offset: {d}, extra_bits: {d}", .{length_code.code, length_code.offset, length_code.extra_bits});
+                try self.bit_writer.writeLength(length_prefix_code.code, length_prefix_code.length);
+                if (length_code.extra_bits > 0) {
+                    try self.bit_writer.writeLengthLSB(length_code.offset, length_code.extra_bits);
+                }
+                
+                // write distance part
+                const distance_code = try PrefixCodes.getDistanceCode(token.match.dist);
+                std.log.debug("write distance code: ({b:0>5}), offset: {d}, extra_bits: {d}", .{distance_code.code, distance_code.offset, distance_code.extra_bits});
+                try self.bit_writer.writeLength(distance_code.code, distance_code_bits);
+                if (distance_code.extra_bits > 0) {
+                    try self.bit_writer.writeLengthLSB(distance_code.offset, distance_code.extra_bits);
+                }
             }
         }
-
+        
+        std.debug.print("\n", .{});
         // write EOB
         const eob = prefix_codes[eob_symbol];
         try self.bit_writer.writeLength(eob.code, eob.length);

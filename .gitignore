@@ -3,3 +3,4 @@
 zig-out/
 *.o
 *.gz
+test-files/

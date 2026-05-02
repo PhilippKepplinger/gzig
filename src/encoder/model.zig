@@ -31,6 +31,19 @@ pub const CompressedBlockHeader = packed struct {
     btype: u2 = 0x0, // 0 = uncompressed
 };
 
+pub const LDCode = struct {
+    code: u16,
+    offset: u32,
+    extra_bits: u4
+};
+
+pub const CodeLookup = struct {
+    min: u32,
+    max: u32,
+    base_code: u16,
+    extra_bits: u4
+};
+
 pub const PrefixCode = struct {
     length: u4,
     code: u16,

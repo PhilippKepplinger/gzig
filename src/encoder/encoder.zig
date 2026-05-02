@@ -7,7 +7,7 @@ const model = @import("model.zig");
 const PrefixCodes = @import("prefix-codes.zig").PrefixCodes;
 const BitWriter = @import("bit-writer.zig").BitWriter;
 const Packager = @import("packager.zig").Packager;
-const LZSS = @import("lzss.zig").LZSS;
+const lzss = @import("lzss.zig");
 
 pub const read_buffer_size: u16 = 65535; // 65535
 pub const search_buffer_size: u32 = 32768; // 32768
@@ -56,8 +56,8 @@ pub const Encoder = struct {
 
         var packager = try Packager.init(allocator, &self.bit_writer);
         defer packager.deinit();
-        var lzss_buf: [search_buffer_size + lookahead_size]u8 = undefined;
-        var lzss = LZSS.init(&packager, &lzss_buf);
+        var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
+        var lzss_encoder = try lzss.LZSS.init(allocator, &packager, &lzss_buffer);
         
         // write blocks per block to file
         var read_buf: [read_buffer_size]u8 = undefined;
@@ -67,21 +67,21 @@ pub const Encoder = struct {
             const bytes_read = try self.reader.interface.readSliceShort(&read_buf);
             is_last = self.reader.atEnd();
 
-            log.debug("Buffer: {s}", .{read_buf});
-            
             if (bytes_read > 0) {
                 const read_chunk = read_buf[0..bytes_read]; // for when read < read_buf.len, usually at EOF
                 
-                for (read_chunk, 0..) |symbol, i| {
-                    _ = i;
-                    _ = try lzss.consume(symbol);
+                std.log.debug("read new chunk from input file: {d}", .{bytes_read});
+                std.log.debug("========================================================", .{});
+                
+                for (read_chunk) |literal| {
+                   try lzss_encoder.process(literal);
                 }
                 
                 self.crc32.update(read_chunk);
             }
             
             if (is_last) {
-                try lzss.finish();
+                try lzss_encoder.finish();
             }
         }
 

@@ -60,12 +60,33 @@ pub const BitWriter = struct {
             try self.writeBit(bit);
         }
     }
+
+    pub fn writeLengthLSB(self: *BitWriter, value: u32, length: u4) !void {
+        for (0..length) |pos| {
+            const bit: u1 = @intCast((value >> @intCast(pos)) & 0b00000001);
+            try self.writeBit(bit);
+        }
+    }
+
+    pub fn writeValue(self: *BitWriter, value: u16) !void {
+        const leading_zeros = @clz(value);
+        const rightmost_set_bit = 16 - leading_zeros;
+
+        for (0..rightmost_set_bit) |pos| {
+            const bit: u1 = @intCast((value >> @intCast(pos)) & 0b00000001);
+            try self.writeBit(bit);
+        }
+    }
     
     /// Write the bit buffer to the writer. This may include "undefined" bits.
     /// To ensure the written byte is defined, only write in multiples of 8.
     pub fn flush(self: *BitWriter) !void {
+        std.log.debug("flush bits: {d}", .{self.bits});
+        
         if (self.bits != 0) {
             try self.writeBuffer();
+            self.bits = 0;
+            self.buffer = 0;
         }
     }
     
@@ -139,6 +160,30 @@ test "writeLength" {
     // write the value MSB first, but starting from the 9th bit (from the right, LSB side), not the full bit-width (u16)
     try std.testing.expectEqualDeep(0b11111011, output_buffer[0]);
     try std.testing.expectEqualDeep(0b00001010, output_buffer[1]);
+}
+
+test "writeValue" {
+    var output_buffer: [2]u8 = undefined;
+    var writer = std.Io.File.stdout().writer(std.testing.io, &output_buffer).interface;
+    var bit_writer = BitWriter.init(&writer);
+
+    try bit_writer.writeValue(0b0000000100000000);
+    try bit_writer.writeValue(0b01011111);
+
+    try std.testing.expectEqual(0b00000000, output_buffer[0]);
+    try std.testing.expectEqual(0b10111111, output_buffer[1]);
+}
+
+test "writeLengthLSB" {
+    var output_buffer: [1]u8 = undefined;
+    var writer = std.Io.File.stdout().writer(std.testing.io, &output_buffer).interface;
+    var bit_writer = BitWriter.init(&writer);
+
+    try bit_writer.writeBit(1);
+    try bit_writer.writeLengthLSB(1, 6);
+    try bit_writer.writeBit(1);
+
+    try std.testing.expectEqual(0b10000011, output_buffer[0]);
 }
 
 test "flush" {
