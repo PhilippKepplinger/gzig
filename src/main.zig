@@ -6,7 +6,7 @@ const gzig = @import("gzig");
 const encoder = @import("encoder/encoder.zig");
 
 pub const std_options: std.Options = .{
-    .log_level = .warn,
+    .log_level = .info,
 };
 
 pub fn main(init: std.process.Init) !void {
@@ -43,6 +43,10 @@ test "duptest.txt" {
 
 test "lorem.txt" {
     try testFile("src/tests/lorem.txt", "src/tests/lorem.txt.gz");
+}
+
+test "DSC01560.jpg" {
+    try testFile("src/tests/DSC01560.jpg", "src/tests/DSC01560.jpg.gz");
 }
 
 fn testFile(input_file_path: []const u8, output_file_path: []const u8) !void {

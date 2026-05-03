@@ -68,7 +68,8 @@ pub const LZSS = struct {
         if (self.search_progress >= 3) {
             const hash = hash3(self.current_search[0], self.current_search[1], self.current_search[2]);
             var candidate_index = self.hash_head[hash];
-            // no candidates for this 3 char search
+            
+            // no candidates for this 3-char search
             if (candidate_index == null) {
                 std.log.debug("no candidate, emit {c}", .{self.current_search[0]});
                 // emit first search char and shift others to left, then wait for next literal
@@ -88,7 +89,7 @@ pub const LZSS = struct {
                 if (self.processed_bytes - candidate_index.? > self.buffer.len()) {
                     break;
                 }
-
+                
                 const buffer_idx = candidate_index.? % self.buffer.len();
                 std.log.debug("found candidate for: {d} => ({d})", .{candidate_index.?, buffer_idx});
 
@@ -128,6 +129,7 @@ pub const LZSS = struct {
 
                 // next candidate
                 candidate_index = self.hash_prev[buffer_idx];
+
             }
             
             // candidates not good enough
