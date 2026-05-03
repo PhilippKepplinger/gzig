@@ -7,23 +7,21 @@ pub const max_lookahead_window: u16 = 258;
 pub const search_buffer_size: u16 = 32768;
 
 pub const LZSS = struct {
+    processed_bytes: u64 = 0,
     buffer: RingBuffer,
     packager: *Packager,
     allocator: std.mem.Allocator,
     search_progress: u16 = 0,
     current_search: [max_lookahead_window]u8 = undefined,
-    hash_head: [search_buffer_size]?u16 = undefined,
-    hash_prev: [search_buffer_size]?u16 = undefined,
-    
-    candidate_indices: std.ArrayList(u16),
+    hash_head: [search_buffer_size]?u64 = undefined,
+    hash_prev: [search_buffer_size]?u64 = undefined,
     max_candidates: u8 = 32,
     
     pub fn init(allocator: std.mem.Allocator, packager: *Packager, buffer: []u8) !LZSS {
         return .{
             .buffer = RingBuffer.init(buffer),
             .packager = packager,
-            .allocator = allocator,
-            .candidate_indices = try std.ArrayList(u16).initCapacity(allocator, std.math.maxInt(u8)),
+            .allocator = allocator
         };
     }
     
@@ -34,6 +32,7 @@ pub const LZSS = struct {
     }
     
     fn encode(self: *LZSS) !void {
+        self.processed_bytes += 1;
         const literal_index: u16 = @intCast(self.buffer.getLastSetIndex());
         const literal = self.buffer.getCurrent();
         std.log.debug("literal: ({c}) at: {}", .{literal, literal_index});
@@ -43,13 +42,14 @@ pub const LZSS = struct {
             const a = try self.buffer.getOffset(2);
             const b = try self.buffer.getOffset(1);
             const hash = hash3(a, b, literal);
-            const hash_index: u16 = if (literal_index >= 2) literal_index - 2 else @intCast(self.buffer.len() + literal_index - 2); // because we look back 2 symbols 
-            self.hash_prev[hash_index] = self.hash_head[hash];
+            const hash_index = self.processed_bytes - 3; // -3 because we have three symbols 
+            const prev_index = hash_index % self.buffer.len();
+            self.hash_prev[prev_index] = self.hash_head[hash];
             self.hash_head[hash] = hash_index;
-            // std.log.debug("set hash at {d} to ({c}{c}{c})", .{hash_index, a, b, literal});
-
-            if (self.hash_prev[hash_index] != null) {
-                std.log.debug("prev candidate: {d}", .{self.hash_prev[hash_index].?});
+            
+            std.log.debug("set hash at {d} to ({c}{c}{c})", .{hash_index, a, b, literal});
+            if (self.hash_prev[prev_index] != null) {
+                std.log.debug("set prev at {d} to ({d})", .{prev_index, self.hash_head[hash].?});
             }
         } else {
             // always emit literal, there can be no backreference
@@ -66,10 +66,10 @@ pub const LZSS = struct {
 
         // once we have long enough search, check candidates
         if (self.search_progress >= 3) {
-            const search_hash = hash3(self.current_search[0], self.current_search[1], self.current_search[2]);
-            const head_index = self.hash_head[search_hash];
+            const hash = hash3(self.current_search[0], self.current_search[1], self.current_search[2]);
+            var candidate_index = self.hash_head[hash];
             // no candidates for this 3 char search
-            if (head_index == null) {
+            if (candidate_index == null) {
                 std.log.debug("no candidate, emit {c}", .{self.current_search[0]});
                 // emit first search char and shift others to left, then wait for next literal
                 try self.emitLiteral(self.current_search[0]);
@@ -80,20 +80,28 @@ pub const LZSS = struct {
                 return;
             }
             
-            var best_candidate_index: u16 = undefined;
+            var best_candidate_index: u64 = undefined;
             var longest_match: u16 = 0;
             var depth: u16 = 0;
-            var candidate_index = self.hash_prev[head_index.?];
             
             while (candidate_index != null and depth < self.max_candidates) {
-                //std.log.debug("found candidate at: ({d})", .{candidate_index.?});
-                
-                const dist = self.buffer.getDistance(candidate_index.?);
+                if (self.processed_bytes - candidate_index.? > self.buffer.len()) {
+                    break;
+                }
+
+                const buffer_idx = candidate_index.? % self.buffer.len();
+                std.log.debug("found candidate for: {d} => ({d})", .{candidate_index.?, buffer_idx});
+
+                const dist = self.buffer.getDistance(buffer_idx);
                 // prevents to find candidates in hashes created during the current search
                 if (dist <= self.search_progress) {
                     // next candidate
-                    std.log.debug("purge candidate_index: {d}, search progress: {d}, literal_index: {d}, dist: {d}", .{ candidate_index.?, self.search_progress, literal_index, dist});
-                    candidate_index = self.hash_prev[candidate_index.?];
+                    std.log.debug("purge candidate_index: {d}, search progress: {d}, literal_index: {d}, dist: {d}", .{ buffer_idx, self.search_progress, literal_index, dist});
+                    const temp_idx = candidate_index.?;
+                    candidate_index = self.hash_prev[buffer_idx];
+                    if (candidate_index != null and candidate_index.? == temp_idx) {
+                        return error.CircularHash;
+                    }
                     continue;
                 }
 
@@ -105,7 +113,7 @@ pub const LZSS = struct {
                     // std.log.debug("check ({c}) == ({c})", .{self.buffer.getAt(candidate_index.? + i), self.current_search[i]});
                     
                     // check missmatch
-                    if (self.current_search[i] != self.buffer.getAt(candidate_index.? + i)) {
+                    if (self.current_search[i] != self.buffer.getAt(buffer_idx + i)) {
                         break;
                     }
 
@@ -115,11 +123,11 @@ pub const LZSS = struct {
                 // remember best match
                 if (match_len > longest_match) {
                     longest_match = match_len;
-                    best_candidate_index = candidate_index.?;
+                    best_candidate_index = buffer_idx;
                 }
 
                 // next candidate
-                candidate_index = self.hash_prev[candidate_index.?];
+                candidate_index = self.hash_prev[buffer_idx];
             }
             
             // candidates not good enough
@@ -191,6 +199,7 @@ pub const LZSS = struct {
     /// no data will be added anymore to the buffer
     /// run through the rest of the lookahead data and then package
     pub fn finish(self: *LZSS) !void {
+        std.log.debug("finish LZSS encoding", .{});
         // if there is search progress, just emit literals for testing now...
         // TODO should also check for current candidates later
         if (self.search_progress > 0) {
@@ -201,7 +210,6 @@ pub const LZSS = struct {
 
         // package data and clear candidates buffer
         try self.packager.package(true);
-        self.candidate_indices.clearAndFree(self.allocator);
     }
     
     fn getBestCandidateMatch(self: *LZSS) !model.LZToken {

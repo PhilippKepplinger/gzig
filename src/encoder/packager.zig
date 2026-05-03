@@ -39,11 +39,6 @@ pub const Packager = struct {
         try self.lzss_stream.append(self.allocator, token);
     }
     
-    /// Checks if now is a good time to package the data
-    pub fn check() void {
-        // TODO
-    }
-    
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
         // TODO decide block dynamically and over ranges of the data, not all at once
@@ -51,7 +46,7 @@ pub const Packager = struct {
         
         const tokens = self.lzss_stream.items;
         
-        std.log.debug("package {d} tokens", .{self.lzss_stream.items.len});
+        std.log.info("package {d} tokens", .{self.lzss_stream.items.len});
 
         switch (btype) {
             0 => try self.storeUncompressed(tokens, is_last),
@@ -71,6 +66,9 @@ pub const Packager = struct {
             std.log.info("flush bit-writer to byte align data stream", .{});
             try self.bit_writer.flush();
         }
+
+        std.log.info("package done", .{});
+
     }
 
     /// block type 00

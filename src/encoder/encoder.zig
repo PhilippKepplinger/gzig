@@ -67,7 +67,7 @@ pub const Encoder = struct {
             if (bytes_read > 0) {
                 const read_chunk = read_buf[0..bytes_read]; // for when read < read_buf.len, usually at EOF
                 
-                std.log.info("read new chunk from input file: {d}", .{bytes_read});
+                std.log.info("[last={}] read new chunk from input file: {d}", .{is_last, bytes_read});
                 
                 const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
                 for (read_chunk) |literal| {
