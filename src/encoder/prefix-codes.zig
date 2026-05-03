@@ -214,6 +214,16 @@ test "getDistanceCode" {
     try testing.expectEqual(6, distance_code.code);
     try testing.expectEqual(2, distance_code.extra_bits);
     try testing.expectEqual(0, distance_code.offset);
+
+    distance_code = try PrefixCodes.getDistanceCode(19260);
+    try testing.expectEqual(28, distance_code.code);
+    try testing.expectEqual(13, distance_code.extra_bits);
+    try testing.expectEqual(2875, distance_code.offset);
+    
+    distance_code = try PrefixCodes.getDistanceCode(32768);
+    try testing.expectEqual(29, distance_code.code);
+    try testing.expectEqual(13, distance_code.extra_bits);
+    try testing.expectEqual(8191, distance_code.offset);
 }
 
 test "test fixed prefix codes for block type 01" {
@@ -233,5 +243,6 @@ test "test fixed prefix codes for block type 01" {
     try testing.expectEqual(0, code_table[256].code);
     try testing.expectEqual(23, code_table[279].code);
     try testing.expectEqual(192, code_table[280].code);
+    try testing.expectEqual(197, code_table[285].code);
     try testing.expectEqual(199, code_table[287].code);
 }

@@ -9,10 +9,8 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const Packager = @import("packager.zig").Packager;
 const lzss = @import("lzss.zig");
 
-pub const read_buffer_size: u16 = 65535; // 65535
-pub const search_buffer_size: u32 = 32768; // 32768
-pub const checkpoint_size: u16 = (read_buffer_size + 1) / 4; // 16384
-pub const lookahead_size: u16 = 258;
+pub const read_buffer_size: u16 = 65535;
+pub const search_buffer_size: u32 = 32768;
 
 pub const Encoder = struct {
     io: Io,
@@ -53,7 +51,7 @@ pub const Encoder = struct {
         try self.bit_writer.writeBytes(header_bytes[0..]);
         try self.bit_writer.flush();
 
-        var packager = try Packager.init(self.allocator, &self.bit_writer);
+        var packager = try Packager.init(self.io,self.allocator, &self.bit_writer);
         defer packager.deinit();
         var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
         var lzss_encoder = try lzss.LZSS.init(self.allocator, &packager, &lzss_buffer);
@@ -71,10 +69,13 @@ pub const Encoder = struct {
                 
                 std.log.info("read new chunk from input file: {d}", .{bytes_read});
                 
+                const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
                 for (read_chunk) |literal| {
                    try lzss_encoder.process(literal);
                 }
-                
+                const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+                std.log.info("processing read chunk took: {d} ms", .{end.toMilliseconds() - start.toMilliseconds()});
+
                 self.crc32.update(read_chunk);
             }
             

@@ -37,7 +37,27 @@ pub const RingBuffer = struct {
         return self.buffer[self.next_pos - 1];
     }
     
-    // 
+    pub fn getLastSetIndex(self: *RingBuffer) usize {
+        if (self.next_pos == 0) {
+            return self.buffer.len - 1;
+        }
+        
+        return self.next_pos - 1;
+    }
+    
+    pub fn getAt(self: *RingBuffer, index: usize) u8 {
+        return self.buffer[index % self.buffer.len];
+    }
+    
+    pub fn getDistance(self: *RingBuffer, index: usize) usize {
+        const last_set_index = self.getLastSetIndex();
+        if (index < last_set_index) {
+            return last_set_index - index;
+        }
+        
+        return self.buffer.len - (index - last_set_index);
+    }
+    
     pub fn getOffset(self: *RingBuffer, offset: usize) !u8 {
         if (offset >= self.buffer.len) {
             @branchHint(std.builtin.BranchHint.unlikely);
@@ -61,6 +81,10 @@ pub const RingBuffer = struct {
     pub fn getMaxOffset(self: *RingBuffer) usize {
         return self.filled - 1;
     }
+    
+    pub fn len(self: *RingBuffer) usize {
+        return self.buffer.len;
+    }
 };
 
 test "add" {
@@ -78,6 +102,32 @@ test "add" {
     try std.testing.expectEqual(3, ring_buffer.buffer[2]);
     try std.testing.expectEqual(0, ring_buffer.next_pos);
     try std.testing.expectEqual(3, ring_buffer.filled);
+}
+
+test "getLastSetIndex" {
+    var buffer: [8]u8 = undefined;
+    var ring_buffer = RingBuffer.init(buffer[0..]);
+
+    ring_buffer.add(1);
+    ring_buffer.add(2);
+    ring_buffer.add(3);
+    try std.testing.expectEqual(2, ring_buffer.getLastSetIndex());
+}
+
+test "getAt" {
+    var buffer: [4]u8 = undefined;
+    var ring_buffer = RingBuffer.init(buffer[0..]);
+
+    ring_buffer.add(1);
+    ring_buffer.add(2);
+    ring_buffer.add(3);
+    ring_buffer.add(4);
+    
+    try std.testing.expectEqual(1, ring_buffer.getAt(0));
+    try std.testing.expectEqual(2, ring_buffer.getAt(1));
+    try std.testing.expectEqual(3, ring_buffer.getAt(2));
+    try std.testing.expectEqual(4, ring_buffer.getAt(3));
+    try std.testing.expectEqual(1, ring_buffer.getAt(4));
 }
 
 test "getCurrent" {
@@ -112,4 +162,33 @@ test "getOffset" {
     try std.testing.expectEqual(5, ring_buffer.getOffset(1));
     try std.testing.expectEqual(4, ring_buffer.getOffset(2));
     try std.testing.expectEqual(3, ring_buffer.getOffset(3));
+}
+
+test "getDistance" {
+    var buffer: [4]u8 = undefined;
+    var ring_buffer = RingBuffer.init(buffer[0..]);
+
+    ring_buffer.add(1);
+    ring_buffer.add(2);
+    ring_buffer.add(3);
+    ring_buffer.add(4);
+    ring_buffer.add(5);
+    ring_buffer.add(6);
+
+    try std.testing.expectEqual(1, ring_buffer.getLastSetIndex());
+    try std.testing.expectEqual(1, ring_buffer.getDistance(0));
+    try std.testing.expectEqual(4, ring_buffer.getDistance(1));
+    try std.testing.expectEqual(3, ring_buffer.getDistance(2));
+    try std.testing.expectEqual(2, ring_buffer.getDistance(3));
+}
+
+test "getDistance 32k" {
+    const size = 32768;
+    var buffer: [size]u8 = undefined;
+    var ring_buffer = RingBuffer.init(buffer[0..]);
+
+    ring_buffer.add(1);
+
+    try std.testing.expectEqual(0, ring_buffer.getLastSetIndex());
+    try std.testing.expectEqual(size, ring_buffer.getDistance(0));
 }
