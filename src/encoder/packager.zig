@@ -128,8 +128,7 @@ pub const Packager = struct {
                 }
             } else {
                 //std.log.debug("({d}:{d})", .{token.match.len, token.match.dist});
-                defer self.allocator.free(token.match.consumed); // this is not needed
-                
+
                 // write length part
                 const length_code = try PrefixCodes.getLengthCode(token.match.len);
                 const length_prefix_code = prefix_codes[length_code.code];

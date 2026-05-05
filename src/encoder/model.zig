@@ -54,6 +54,5 @@ pub const LZToken = union(enum) {
     match: struct {
         len: u16,
         dist: u16,
-        consumed: []u8,
     }
 };

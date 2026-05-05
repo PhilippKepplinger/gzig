@@ -86,6 +86,7 @@ pub const LZSS = struct {
             var depth: u16 = 0;
             
             while (candidate_index != null and depth < self.max_candidates) {
+                // cache is outside the search_buffer, so stop here
                 if (self.processed_bytes - candidate_index.? > self.buffer.len()) {
                     break;
                 }
@@ -129,7 +130,6 @@ pub const LZSS = struct {
 
                 // next candidate
                 candidate_index = self.hash_prev[buffer_idx];
-
             }
             
             // candidates not good enough
@@ -144,16 +144,13 @@ pub const LZSS = struct {
             } else if (longest_match < self.search_progress) {
                 // no candidate equals current search, but candidate at least length 3
                 const dist = self.buffer.getDistance(best_candidate_index) - longest_match; // distance from starting symbol index, not current literal index
-                var consumed= try self.allocator.alloc(u8, longest_match);
-                @memcpy(consumed[0..longest_match], self.current_search[0..longest_match]);
                 
-                std.log.debug("emit: dist: {d}, len: {d}, consumed: ({s})", .{dist, longest_match, consumed});
+                std.log.debug("emit: dist: {d}, len: {d}", .{dist, longest_match});
                 
                 try self.emit(.{ 
                     .match = .{
                         .dist = @intCast(dist),
                         .len = longest_match,
-                        .consumed = consumed,
                     }
                 });
 
@@ -161,23 +158,20 @@ pub const LZSS = struct {
                 self.current_search[0] = literal;
                 self.search_progress = 1;
                 
-                std.log.debug("candidates found for ({s}), new search: ({s})", .{consumed, self.current_search[0..self.search_progress]});
+                std.log.debug("candidates found, new search: ({s})", .{self.current_search[0..self.search_progress]});
             } else if (longest_match == max_lookahead_window) {
                 // max window length reached, stop search and emit candidate
                 std.log.debug("max lookahead reached, candiate index: ({d})", .{best_candidate_index});
                 std.log.debug("search progress: ({d})", .{self.search_progress});
                 std.log.debug("distance in buffer: ({d})", .{self.buffer.getDistance(best_candidate_index)});
                 const dist = self.buffer.getDistance(best_candidate_index) - self.search_progress + 1; // distance from starting symbol index, not current literal index + 1 because the literal is included in the reference!
-                var consumed= try self.allocator.alloc(u8, longest_match);
-                @memcpy(consumed[0..longest_match], self.current_search[0..longest_match]);
                 
-                std.log.debug("emit: dist: {d}, len: {d}, consumed: ({s})", .{dist, longest_match, consumed});
+                std.log.debug("emit: dist: {d}, len: {d}", .{dist, longest_match});
                 
                 try self.emit(.{
                     .match = .{
                         .dist = @intCast(dist),
                         .len = longest_match,
-                        .consumed = consumed,
                     }
                 });
 
@@ -212,27 +206,6 @@ pub const LZSS = struct {
 
         // package data and clear candidates buffer
         try self.packager.package(true);
-    }
-    
-    fn getBestCandidateMatch(self: *LZSS) !model.LZToken {
-        const distance = std.mem.min(u16, self.candidate_indices.items);
-        return try self.createCandidateMatch(distance);
-    }
-    
-    fn createCandidateMatch(self: *LZSS, distance: u16) !model.LZToken {
-        const len = self.search_progress;
-        var consumed= try self.allocator.alloc(u8, len);
-        @memcpy(consumed[0..len], self.current_search[0..len]);
-        
-        std.log.debug("emit: dist: {d}, len: {d}, consumed: {s}", .{distance, len, consumed});
-        
-        return .{
-            .match = .{
-                .len = len,
-                .dist = distance,
-                .consumed = consumed,
-            }
-        };
     }
     
     /// bit-packed direct hash

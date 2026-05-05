@@ -30,6 +30,8 @@ pub const Encoder = struct {
     }
     
     pub fn encode(self: *Encoder, file_path: []const u8) !void {
+        const time_start = Io.Timestamp.now(self.io, std.Io.Clock.real);
+        
         self.crc32 = .{};
         self.input = try Io.Dir.cwd().openFile(self.io, file_path, .{});
         defer self.input.close(self.io);
@@ -91,6 +93,9 @@ pub const Encoder = struct {
         try self.bit_writer.writeBytes(footer_bytes[0..]);
         try self.bit_writer.flush(); // empty the bit_writer buffer
         try self.writer.flush(); // flush data to output writer
+        
+        const duration = std.Io.Timestamp.untilNow(time_start, self.io, std.Io.Clock.real);
+        std.log.warn("encoded in {d} ms", .{duration.toMilliseconds()});
     }
 
     fn createOutputFile(self: *Encoder, file_path: []const u8) !Io.File {

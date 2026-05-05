@@ -6,7 +6,7 @@ const gzig = @import("gzig");
 const encoder = @import("encoder/encoder.zig");
 
 pub const std_options: std.Options = .{
-    .log_level = .info,
+    .log_level = .warn,
 };
 
 pub fn main(init: std.process.Init) !void {

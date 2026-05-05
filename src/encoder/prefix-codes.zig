@@ -3,6 +3,8 @@ const model = @import("model.zig");
 
 pub const max_alphabet_symbol: u16 = 288;
 pub const max_prefixcode_bits: u8 = 15;
+
+/// lookup table for length codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
 const length_table = [_]model.CodeLookup{
     .{ .min = 3,   .max = 3,   .base_code = 257, .extra_bits = 0 },
     .{ .min = 4,   .max = 4,   .base_code = 258, .extra_bits = 0 },
@@ -35,6 +37,7 @@ const length_table = [_]model.CodeLookup{
     .{ .min = 258, .max = 258, .base_code = 285, .extra_bits = 0 },
 };
 
+/// lookup table for distance codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
 const distance_table = [_]model.CodeLookup{
     .{ .min = 1,     .max = 1,     .base_code = 0,  .extra_bits = 0 },
     .{ .min = 2,     .max = 2,     .base_code = 1,  .extra_bits = 0 },
