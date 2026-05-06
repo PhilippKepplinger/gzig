@@ -4,6 +4,7 @@ const std = @import("std");
 /// tracks current position and how much of the buffer is currently set
 pub const RingBuffer = struct {
     buffer: []u8,
+    current_pos: usize = undefined,
     next_pos: usize,
     filled: usize,
     
@@ -18,31 +19,24 @@ pub const RingBuffer = struct {
     /// push a single byte into the buffer and advance the current position
     pub fn add(self: *RingBuffer, byte: u8) void {
         self.buffer[self.next_pos] = byte;
+        self.current_pos = self.next_pos;
         self.next_pos += 1;
 
         if (self.next_pos == self.buffer.len) {
             self.next_pos = 0;
         }
-        
+
         if (self.filled < self.buffer.len) {
             self.filled += 1;
         }
     }
     
     pub fn getCurrent(self: *RingBuffer) u8 {
-        if (self.next_pos == 0) {
-            return self.buffer[self.buffer.len - 1];
-        }
-        
-        return self.buffer[self.next_pos - 1];
+        return self.buffer[self.current_pos];
     }
     
     pub fn getLastSetIndex(self: *RingBuffer) usize {
-        if (self.next_pos == 0) {
-            return self.buffer.len - 1;
-        }
-        
-        return self.next_pos - 1;
+        return self.current_pos;
     }
     
     pub fn getAt(self: *RingBuffer, index: usize) u8 {
@@ -50,17 +44,16 @@ pub const RingBuffer = struct {
     }
     
     pub fn getDistance(self: *RingBuffer, index: usize) usize {
-        const last_set_index = self.getLastSetIndex();
-        if (index < last_set_index) {
-            return last_set_index - index;
+        if (index < self.current_pos) {
+            return self.current_pos - index;
         }
         
-        return self.buffer.len - (index - last_set_index);
+        return self.buffer.len - (index - self.current_pos);
     }
     
     pub fn getOffset(self: *RingBuffer, offset: usize) !u8 {
         if (offset >= self.buffer.len) {
-            @branchHint(std.builtin.BranchHint.unlikely);
+            @branchHint(std.builtin.BranchHint.cold);
             return error.OutOfRange;
         }
 
@@ -76,10 +69,6 @@ pub const RingBuffer = struct {
                 return self.buffer[pos];
             }
         }
-    }
-    
-    pub fn getMaxOffset(self: *RingBuffer) usize {
-        return self.filled - 1;
     }
     
     pub fn len(self: *RingBuffer) usize {

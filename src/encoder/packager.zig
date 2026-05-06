@@ -123,12 +123,9 @@ pub const Packager = struct {
                 // write literals as prefix codes
                 if (token.literal < eob_symbol) {
                     const code = prefix_codes[token.literal];
-                    //std.log.debug("write literal code: ({b:0>7})", .{code.code});
                     try self.bit_writer.writeLength(code.code, code.length);
                 }
             } else {
-                //std.log.debug("({d}:{d})", .{token.match.len, token.match.dist});
-
                 // write length part
                 const length_code = try PrefixCodes.getLengthCode(token.match.len);
                 const length_prefix_code = prefix_codes[length_code.code];

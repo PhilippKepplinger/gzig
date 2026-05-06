@@ -71,12 +71,10 @@ pub const Encoder = struct {
                 
                 std.log.info("[last={}] read new chunk from input file: {d}", .{is_last, bytes_read});
                 
-                const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+                // this is the hot loop
                 for (read_chunk) |literal| {
                    try lzss_encoder.process(literal);
                 }
-                const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
-                std.log.info("processing read chunk took: {d} ms", .{end.toMilliseconds() - start.toMilliseconds()});
 
                 self.crc32.update(read_chunk);
             }
