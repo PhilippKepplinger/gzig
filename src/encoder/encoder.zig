@@ -54,7 +54,6 @@ pub const Encoder = struct {
         try self.bit_writer.flush();
 
         var packager = try Packager.init(self.io,self.allocator, &self.bit_writer);
-        defer packager.deinit();
         var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
         var lzss_encoder = try lzss.LZSS.init(self.allocator, &packager, &lzss_buffer);
         

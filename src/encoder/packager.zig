@@ -13,17 +13,17 @@ pub const distance_code_bits: u8 = 5;
 pub const Packager = struct {
     io: std.Io,
     bit_writer: *BitWriter,
-    lzss_stream: std.ArrayList(model.LZToken),
-    max_size: u16 = max_uncompressed_length,
-    read: u32 = 0,
     allocator: std.mem.Allocator,
+    literals_read: u32 = 0,
+    tokens: u32 = 0,
+    lzss_stream: [max_uncompressed_length]model.LZToken,
 
     pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter) !Packager {
         return .{
             .io = io,
             .allocator = allocator,
             .bit_writer = bit_writer,
-            .lzss_stream = try std.ArrayList(model.LZToken).initCapacity(allocator, std.math.maxInt(u16))
+            .lzss_stream = undefined,
         };
     }
     
@@ -31,12 +31,13 @@ pub const Packager = struct {
         const consumed = if (token == .literal) 1 else token.match.len;
         
         // if this token would exceed buffer limit => package first
-        if (self.read + consumed >= self.max_size) {
+        if (self.literals_read + consumed >= max_uncompressed_length) {
             try self.package(false);
         }
 
-        self.read += consumed;
-        try self.lzss_stream.append(self.allocator, token);
+        self.literals_read += consumed;
+        self.lzss_stream[self.tokens] = token;
+        self.tokens += 1;
     }
     
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
@@ -44,9 +45,9 @@ pub const Packager = struct {
         // TODO decide block dynamically and over ranges of the data, not all at once
         const btype: u2 = 0x01;
         
-        const tokens = self.lzss_stream.items;
+        const tokens = self.lzss_stream[0..self.tokens];
         
-        std.log.info("package {d} tokens", .{self.lzss_stream.items.len});
+        std.log.info("package {d} tokens", .{self.tokens});
 
         switch (btype) {
             0 => try self.storeUncompressed(tokens, is_last),
@@ -58,8 +59,8 @@ pub const Packager = struct {
         }
         
         // reset for new data to come in
-        self.read = 0;
-        self.lzss_stream.clearRetainingCapacity();
+        self.literals_read = 0;
+        self.tokens = 0;
         
         if (is_last) {
             // flush to byte align the data stream
@@ -68,7 +69,6 @@ pub const Packager = struct {
         }
 
         std.log.info("package done", .{});
-
     }
 
     /// block type 00
@@ -148,9 +148,5 @@ pub const Packager = struct {
         // write EOB
         const eob = prefix_codes[eob_symbol];
         try self.bit_writer.writeLength(eob.code, eob.length);
-    }
-
-    pub fn deinit(self: *Packager) void {
-        self.lzss_stream.deinit(self.allocator);
     }
 };
