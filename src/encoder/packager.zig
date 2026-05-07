@@ -123,14 +123,14 @@ pub const Packager = struct {
                 // write literals as prefix codes
                 if (token.literal < eob_symbol) {
                     const code = prefix_codes[token.literal];
-                    try self.bit_writer.writeLength(code.code, code.length);
+                    try self.bit_writer.writeLengthMSB(code.code, code.length);
                 }
             } else {
                 // write length part
                 const length_code = try PrefixCodes.getLengthCode(token.match.len);
                 const length_prefix_code = prefix_codes[length_code.code];
                 std.log.info("write length code [{d}]: {d}:({b:0>7}), offset: {d}, extra_bits: {d}", .{token.match.len, length_prefix_code.code, length_prefix_code.code, length_code.offset, length_code.extra_bits});
-                try self.bit_writer.writeLength(length_prefix_code.code, length_prefix_code.length);
+                try self.bit_writer.writeLengthMSB(length_prefix_code.code, length_prefix_code.length);
                 if (length_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(length_code.offset, length_code.extra_bits);
                 }
@@ -138,7 +138,7 @@ pub const Packager = struct {
                 // write distance part
                 const distance_code = try PrefixCodes.getDistanceCode(token.match.dist);
                 std.log.info("write distance code [{d}]: ({b:0>5}), offset: {d}, extra_bits: {d}", .{token.match.dist, distance_code.code, distance_code.offset, distance_code.extra_bits});
-                try self.bit_writer.writeLength(distance_code.code, distance_code_bits);
+                try self.bit_writer.writeLengthMSB(distance_code.code, distance_code_bits);
                 if (distance_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(distance_code.offset, distance_code.extra_bits);
                 }
@@ -147,6 +147,9 @@ pub const Packager = struct {
         
         // write EOB
         const eob = prefix_codes[eob_symbol];
-        try self.bit_writer.writeLength(eob.code, eob.length);
+        try self.bit_writer.writeLengthMSB
+        
+        
+        (eob.code, eob.length);
     }
 };

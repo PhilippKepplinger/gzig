@@ -1,12 +1,11 @@
 const std = @import("std");
 const Io = std.Io;
-const print = std.debug.print;
 
 const gzig = @import("gzig");
 const encoder = @import("encoder/encoder.zig");
 
 pub const std_options: std.Options = .{
-    .log_level = .warn,
+    .log_level = .info,
 };
 
 pub fn main(init: std.process.Init) !void {
