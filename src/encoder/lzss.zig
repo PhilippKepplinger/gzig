@@ -43,7 +43,7 @@ pub const LZSS = struct {
         const b = try self.ring_buffer.getOffset(1);
         const hash = hash3(a, b, literal);
         const hash_index = self.processed_bytes - 3; // -3 because we have three symbols 
-        const prev_index = hash_index % self.ring_buffer.len();
+        const prev_index = hash_index % self.ring_buffer.len;
         self.hash_prev[prev_index] = self.hash_head[hash];
         self.hash_head[hash] = hash_index;
 
@@ -72,11 +72,11 @@ pub const LZSS = struct {
             
             while (candidate_index != null and depth < self.max_candidates) {
                 // cache is outside the search_buffer, so stop here
-                if (self.processed_bytes - candidate_index.? > self.ring_buffer.buffer.len) {
+                if (self.processed_bytes - candidate_index.? > self.ring_buffer.len) {
                     break;
                 }
                 
-                const buffer_idx = candidate_index.? % self.ring_buffer.buffer.len;
+                const buffer_idx = candidate_index.? % self.ring_buffer.len;
                 const global_dist = self.processed_bytes - candidate_index.?; // distance between current global position and candidate global position
                                                                        // 
                 // prevents to find candidates in hashes created during the current search

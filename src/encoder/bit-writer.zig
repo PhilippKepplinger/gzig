@@ -1,14 +1,16 @@
 const std = @import("std");
 
 /// The `BitWriter` allows to write single bits into an output `Io.Writer`.
-/// The bits are stored in a `u8` byte buffer and written once the buffer is full or `flush` is called.
+/// The bits are shifted in a `u64` buffer integer and then drained into a [1024]u8 byte buffer.
+/// Once the byte buffer is full, or the writer is flushed, the buffer is written to the passed writer.
 pub const BitWriter = struct {
-    bytebuf: [1024]u8 = undefined,
-    bytecount: u16 = 0,
+    // intermediate byte buffer for the output writer
+    byte_buffer: [1024]u8 = undefined,
+    byte_count: u16 = 0,
     
     // 64 bit shift integer
-    bitbuf: u64 = 0,
-    bitcount: u6 = 0,
+    bit_buffer: u64 = 0,
+    bit_count: u6 = 0,
 
     writer: *std.Io.Writer,
     
@@ -20,10 +22,10 @@ pub const BitWriter = struct {
     
     /// Writes bit LSB first into the `buffer` byte
     pub fn writeBit(self: *BitWriter, bit: u1) !void {
-        // move the bit to the current position at `bitcount`
-        // bitwise OR sets the bit if 1, does nothing if zero
-        self.bitbuf |= (@as(u64, bit) << self.bitcount);
-        self.bitcount += 1;
+        // move the bit to the current position at `bit_count`
+        // bitwise OR sets the bit if 1, does nothing if 0
+        self.bit_buffer |= (@as(u64, bit) << self.bit_count);
+        self.bit_count += 1;
         
         try self.checkBitBuffer();
     }
@@ -32,8 +34,8 @@ pub const BitWriter = struct {
     /// Always writes the full `@bitSize` of the integer type. 
     /// For example `u8` always writes 8 bits including leading zeros
     pub fn writeBits(self: *BitWriter, comptime T: type, bits: T) !void {
-        self.bitbuf |= (@as(u64, bits) << self.bitcount);
-        self.bitcount += @bitSizeOf(T);
+        self.bit_buffer |= (@as(u64, bits) << self.bit_count);
+        self.bit_count += @bitSizeOf(T);
         
         try self.checkBitBuffer();
     }
@@ -44,35 +46,36 @@ pub const BitWriter = struct {
             try self.writeLengthLSB(byte, 8);
         }
     }
-    
-    /// Writes `len` bits MSB first from the given `value`
+
+    /// writes the first `len` bits of a `u32` into the bit-buffer MSB first
     pub fn writeLengthMSB(self: *BitWriter, value: u32, len: u6) !void {
-        const reversedValue = @bitReverse(value) >> @as(u5, @intCast(32 - len));
-        self.bitbuf |= (@as(u64, reversedValue) << self.bitcount);
-        self.bitcount += len;
+        // reverse the bits and then shift all not needed bits out so only `len` bits remain 
+        const value_reversed = @bitReverse(value) >> @as(u5, @intCast(32 - len));
+        self.bit_buffer |= (@as(u64, value_reversed) << self.bit_count);
+        self.bit_count += len;
         
         try self.checkBitBuffer();
     }
 
+    /// writes the first `len` bits of a `u32` into the bit-buffer LSB first
     pub fn writeLengthLSB(self: *BitWriter, value: u32, len: u6) !void {
-        self.bitbuf |= (@as(u64, value) << self.bitcount);
-        self.bitcount += len;
+        self.bit_buffer |= (@as(u64, value) << self.bit_count);
+        self.bit_count += len;
 
         try self.checkBitBuffer();
     }
     
-    /// Write the bit buffer to the writer. This may include "undefined" bits.
-    /// To ensure the written byte is defined, only write in multiples of 8.
+    /// Writes the current stored byte buffer to the output writer.
     pub fn flush(self: *BitWriter) !void {
-        std.log.debug("flush bits: {d}", .{self.bitcount});
+        std.log.debug("flush bits: {d}", .{self.bit_count});
         
         try self.writeBitBuffer();
         
-        if (self.bitcount != 0) {
-            self.bytebuf[self.bytecount] = @truncate(self.bitbuf);
-            self.bytecount += 1;
-            self.bitbuf = 0;
-            self.bitcount = 0;
+        if (self.bit_count != 0) {
+            self.byte_buffer[self.byte_count] = @truncate(self.bit_buffer);
+            self.byte_count += 1;
+            self.bit_buffer = 0;
+            self.bit_count = 0;
         }
         
         try self.writeByteBufferToOutput();
@@ -80,29 +83,29 @@ pub const BitWriter = struct {
     
     fn checkBitBuffer(self: *BitWriter) !void {
         // only write once buffer is half full
-        if (self.bitcount >= 32) {
+        if (self.bit_count >= 32) {
             try self.writeBitBuffer();
         }
     }
     
     // writes the buffer to the writer
     fn writeBitBuffer(self: *BitWriter) !void {
-        while (self.bitcount >= 8) {
-            self.bytebuf[self.bytecount] = @truncate(self.bitbuf);
-            self.bytecount += 1;
-            self.bitbuf >>= 8;
-            self.bitcount -= 8;
+        while (self.bit_count >= 8) {
+            self.byte_buffer[self.byte_count] = @truncate(self.bit_buffer);
+            self.byte_count += 1;
+            self.bit_buffer >>= 8;
+            self.bit_count -= 8;
             
-            if (self.bytecount == self.bytebuf.len) {
+            if (self.byte_count == self.byte_buffer.len) {
                 try self.writeByteBufferToOutput();
             }
         }
     }
     
     fn writeByteBufferToOutput(self: *BitWriter) !void {
-        for (0..self.bytecount) |i| {
-            try self.writer.writeByte(self.bytebuf[i]);
-            self.bytecount = 0;
+        for (0..self.byte_count) |i| {
+            try self.writer.writeByte(self.byte_buffer[i]);
+            self.byte_count = 0;
         }
     }
 };

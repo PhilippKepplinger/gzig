@@ -1,4 +1,5 @@
 const std = @import("std");
+const BranchHint = std.builtin.BranchHint;
 
 /// simple ring buffer that continuously fills the given buffer
 /// tracks current position and how much of the buffer is currently set
@@ -7,9 +8,11 @@ pub const RingBuffer = struct {
     current_pos: usize = undefined,
     next_pos: usize,
     filled: usize,
+    len: usize, // for convenience
     
     pub fn init(buffer: []u8) RingBuffer {
         return .{
+            .len = buffer.len,
             .buffer = buffer,
             .next_pos = 0,
             .filled = 0,
@@ -23,6 +26,7 @@ pub const RingBuffer = struct {
         self.next_pos += 1;
 
         if (self.next_pos == self.buffer.len) {
+            @branchHint(BranchHint.unlikely);
             self.next_pos = 0;
         }
 
@@ -52,27 +56,21 @@ pub const RingBuffer = struct {
     }
     
     pub fn getOffset(self: *RingBuffer, offset: usize) !u8 {
-        if (offset >= self.buffer.len) {
-            @branchHint(std.builtin.BranchHint.cold);
-            return error.OutOfRange;
-        }
+        if (offset <= self.current_pos) {
+            @branchHint(BranchHint.likely);
+            return self.buffer[self.current_pos - offset];
+        } 
 
-        const current_index = if (self.next_pos == 0) self.buffer.len - 1 else self.next_pos - 1;
-        
-        if (offset <= current_index) {
-            return self.buffer[current_index - offset];
-        } else {
-            const pos = self.buffer.len + current_index - offset;
+        if (offset < self.len) {
+            const pos = self.buffer.len + self.current_pos - offset;
             if (pos >= self.filled) {
                 return error.OutOfRange;
             } else {
                 return self.buffer[pos];
             }
-        }
-    }
-    
-    pub fn len(self: *RingBuffer) usize {
-        return self.buffer.len;
+        } 
+         
+        return error.OutOfRange;
     }
 };
 
