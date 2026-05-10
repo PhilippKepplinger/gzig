@@ -4,10 +4,6 @@ const std = @import("std");
 /// The bits are shifted in a `u64` buffer integer and then drained into a [1024]u8 byte buffer.
 /// Once the byte buffer is full, or the writer is flushed, the buffer is written to the passed writer.
 pub const BitWriter = struct {
-    // intermediate byte buffer for the output writer
-    byte_buffer: [1024]u8 = undefined,
-    byte_count: u16 = 0,
-    
     // 64 bit shift integer
     bit_buffer: u64 = 0,
     bit_count: u6 = 0,
@@ -31,7 +27,7 @@ pub const BitWriter = struct {
     }
     
     /// Writes the bits as LSB first (<= right to left)
-    /// Always writes the full `@bitSize` of the integer type. 
+    /// Always writes the full `@bitSizeOf` of the integer type. 
     /// For example `u8` always writes 8 bits including leading zeros
     pub fn writeBits(self: *BitWriter, comptime T: type, bits: T) !void {
         self.bit_buffer |= (@as(u64, bits) << self.bit_count);
@@ -49,7 +45,7 @@ pub const BitWriter = struct {
 
     /// writes the first `len` bits of a `u32` into the bit-buffer MSB first
     pub fn writeLengthMSB(self: *BitWriter, value: u32, len: u6) !void {
-        // reverse the bits and then shift all not needed bits out so only `len` bits remain 
+        // reverse the bits and then shift all not needed bits out to the right so only `len` bits remain 
         const value_reversed = @bitReverse(value) >> @as(u5, @intCast(32 - len));
         self.bit_buffer |= (@as(u64, value_reversed) << self.bit_count);
         self.bit_count += len;
@@ -72,13 +68,10 @@ pub const BitWriter = struct {
         try self.writeBitBuffer();
         
         if (self.bit_count != 0) {
-            self.byte_buffer[self.byte_count] = @truncate(self.bit_buffer);
-            self.byte_count += 1;
+            try self.writer.writeByte(@truncate(self.bit_buffer));
             self.bit_buffer = 0;
             self.bit_count = 0;
         }
-        
-        try self.writeByteBufferToOutput();
     }
     
     fn checkBitBuffer(self: *BitWriter) !void {
@@ -91,21 +84,9 @@ pub const BitWriter = struct {
     // writes the buffer to the writer
     fn writeBitBuffer(self: *BitWriter) !void {
         while (self.bit_count >= 8) {
-            self.byte_buffer[self.byte_count] = @truncate(self.bit_buffer);
-            self.byte_count += 1;
+            try self.writer.writeByte(@truncate(self.bit_buffer));
             self.bit_buffer >>= 8;
             self.bit_count -= 8;
-            
-            if (self.byte_count == self.byte_buffer.len) {
-                try self.writeByteBufferToOutput();
-            }
-        }
-    }
-    
-    fn writeByteBufferToOutput(self: *BitWriter) !void {
-        for (0..self.byte_count) |i| {
-            try self.writer.writeByte(self.byte_buffer[i]);
-            self.byte_count = 0;
         }
     }
 };

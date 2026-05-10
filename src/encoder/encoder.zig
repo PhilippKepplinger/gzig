@@ -15,9 +15,9 @@ pub const search_buffer_size: u32 = 32768;
 pub const Encoder = struct {
     io: Io,
     allocator: Allocator,
-    input: Io.File = undefined,
+    input_file: Io.File = undefined,
     reader: Io.File.Reader = undefined,
-    output: Io.File = undefined,
+    output_file: Io.File = undefined,
     writer: Io.File.Writer = undefined,
     bit_writer: BitWriter = undefined,
     crc32: CRC32 = undefined,
@@ -33,19 +33,20 @@ pub const Encoder = struct {
         const time_start = Io.Timestamp.now(self.io, std.Io.Clock.real);
         
         self.crc32 = .{};
-        self.input = try Io.Dir.cwd().openFile(self.io, file_path, .{});
-        defer self.input.close(self.io);
+        self.input_file = try Io.Dir.cwd().openFile(self.io, file_path, .{});
+        defer self.input_file.close(self.io);
         
-        self.output = try self.createOutputFile(file_path);
-        defer self.output.close(self.io);
+        self.output_file = try self.createOutputFile(file_path);
+        defer self.output_file.close(self.io);
 
         var output_buf: [read_buffer_size]u8 = undefined;
-        self.writer = self.output.writer(self.io, &output_buf);
+        self.writer = self.output_file.writer(self.io, &output_buf);
         self.bit_writer = BitWriter.init(&self.writer.interface);
 
         var reader_buf: [read_buffer_size]u8 = undefined;
-        self.reader = self.input.reader(self.io, &reader_buf);
+        self.reader = self.input_file.reader(self.io, &reader_buf);
 
+        // write the header
         const header = model.GzHeader{};
         log.info("Header: {X} {X} {X} {X} {X} {X} {X}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
         log.info("Header: {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8} {b:0>8}", .{ header.id1, header.id2, header.cm, header.flags, header.mtime, header.xfl, header.os });
@@ -53,14 +54,15 @@ pub const Encoder = struct {
         try self.bit_writer.writeBytes(header_bytes[0..]);
         try self.bit_writer.flush();
 
-        var packager = try Packager.init(self.io,self.allocator, &self.bit_writer);
+        // init encoder
         var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
-        var lzss_encoder = try lzss.LZSS.init(self.allocator, &packager, &lzss_buffer);
+        var lzss_encoder = try lzss.LZSS.init(self.io, self.allocator, &self.bit_writer, &lzss_buffer);
         
         // write blocks per block to file
         var read_buf: [read_buffer_size]u8 = undefined;
         var is_last = self.reader.atEnd();
 
+        // read through file
         while (!is_last) {
             const bytes_read = try self.reader.interface.readSliceShort(&read_buf);
             is_last = self.reader.atEnd();

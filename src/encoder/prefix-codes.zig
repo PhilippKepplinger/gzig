@@ -1,7 +1,7 @@
 const std = @import("std");
 const model = @import("model.zig");
 
-pub const max_alphabet_symbol: u16 = 288;
+pub const unique_symbols: u16 = 288;
 pub const max_prefixcode_bits: u8 = 15;
 
 /// lookup table for length codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
@@ -73,10 +73,10 @@ const distance_table = [_]model.CodeLookup{
 
 pub const PrefixCodes = struct {
     
-    pub fn getFixedPrefixCodes() ![max_alphabet_symbol]model.PrefixCode {
-        var code_lengths: [max_alphabet_symbol]u4 = undefined;
+    pub fn getFixedPrefixCodes() ![unique_symbols]model.PrefixCode {
+        var code_lengths: [unique_symbols]u4 = undefined;
         
-        for (0..max_alphabet_symbol) |symbol| {
+        for (0..unique_symbols) |symbol| {
             code_lengths[symbol] = try getFixedCodeLength(symbol);
         }
         
@@ -85,8 +85,9 @@ pub const PrefixCodes = struct {
     
     /// standard algorithm for calculating prefix codes according to RFC1951 3.2.2
     /// https://datatracker.ietf.org/doc/html/rfc1951#page-7
-    pub fn getPrefixCodes(code_lengths: [max_alphabet_symbol]u4) [max_alphabet_symbol]model.PrefixCode {
-        var prefix_codes: [max_alphabet_symbol]model.PrefixCode = undefined;
+    pub fn getPrefixCodes(code_lengths: [unique_symbols]u4) [unique_symbols]model.PrefixCode {
+        const max_bits = std.mem.max(u4, &code_lengths);
+        var prefix_codes: [unique_symbols]model.PrefixCode = undefined;
 
         // step 1
         // count occurrences of each code length. max 15 bit
@@ -95,14 +96,23 @@ pub const PrefixCodes = struct {
             bitlength_count[value] += 1;
         }
 
+        // remove zero bitlengths
+        bitlength_count[0] = 0;
+        for (0..bitlength_count.len) |i| {
+            if (bitlength_count[i] > 0) {
+                std.log.info("{d}: {d}", .{i, bitlength_count[i]});
+            }
+        }
+
         // step 2
         // initialize the start code for each code length with the smallest code
         var code: u16 = 0;
         var next_code: [max_prefixcode_bits + 1]u16 = undefined;
-        for (1..(max_prefixcode_bits + 1)) |bits| {
+        for (1..(max_bits + 1)) |bits| {
             // last code + amount of previous bit length codes
             code = (code + bitlength_count[bits - 1]) << 1;
             next_code[bits] = code;
+            std.log.info("bits {d}: start code: {b}", .{bits, code});
         }
 
         // step 3
@@ -114,6 +124,11 @@ pub const PrefixCodes = struct {
                     .length = bitlength,
                 };
                 next_code[bitlength] += 1;
+            } else {
+                prefix_codes[symbol] = .{
+                    .code = 0,
+                    .length = 0,
+                };
             }
         }
 
@@ -129,11 +144,188 @@ pub const PrefixCodes = struct {
             return 9;
         } else if (value <= 279) {
             return 7;
-        } else if (value < max_alphabet_symbol) {
+        } else if (value < unique_symbols) {
             return 8;
         } else {
             return error.UnsupportedSymbol;
         }
+    }
+    
+    /// package-merge algorithm
+    pub fn getCodeLengths(symbol_frequencies: *[unique_symbols]u16) [unique_symbols]u4 {
+        var total_symbols: usize = 0;
+        var frequency_tokens: [unique_symbols]model.PackageNode = undefined;
+        for (0..symbol_frequencies.len) |i| {
+            total_symbols += symbol_frequencies[i];
+            frequency_tokens[i] = .{
+                .symbol = @intCast(i),
+                .weight = symbol_frequencies[i] 
+            };
+            frequency_tokens[i].set(@intCast(i));
+        }
+        
+        std.log.info("total symbols: {d}", .{total_symbols});
+        
+        // sort by frequency asc
+        std.sort.block(model.PackageNode, &frequency_tokens, {}, struct {
+            fn lessThan(_: void, a: model.PackageNode, b: model.PackageNode) bool {
+                return a.weight < b.weight;
+            }
+        }.lessThan);
+        
+        // init list => 1st level
+        var levels: [max_prefixcode_bits][unique_symbols * 2]model.PackageNode = undefined;
+        var package_count: usize = 0;
+        var original_packages: []model.PackageNode = undefined; // tracks the original packages
+        var packages: [unique_symbols * 2]model.PackageNode = undefined; // the current package list
+        var next_packages: [unique_symbols * 2]model.PackageNode = undefined; // holds the original with the merged packages
+        var first_non_zero_index: u16 = 0;
+        var initialized = false;
+        for (frequency_tokens) |package| {
+            if (package.weight != 0) {
+                if (!initialized) {
+                    initialized = true;
+                    original_packages = frequency_tokens[first_non_zero_index..];
+                }
+                packages[package_count] = package;
+                package_count += 1;
+    
+                std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbols.findFirstSet().?, package.weight});
+            }
+
+            first_non_zero_index += 1;
+        }
+        
+        var iterations: u8 = 0;
+        const min_package_count = package_count * 2 - 2;
+        
+        levels[0] = packages;
+        
+        // package-merge until minimum amount of symbols of packages is reached.
+        while (package_count < min_package_count and iterations < max_prefixcode_bits) {
+            
+            // TODO debug
+            for (0..package_count) |idx| {
+                var p = packages[idx];
+                std.log.info("package weight: {d}", .{p.weight});
+                for (0..p.symbols.capacity()) |is| {
+                    const symbol: u16 = @intCast(is);
+                    if (p.contains(symbol)) {
+                        std.log.info("symbol: {d}", .{symbol});
+                    }                    
+                }
+            }
+            
+            // odd number, remove least frequent package ?
+            if (package_count % 2 == 1) {
+                std.log.info("Discard package: {d}", .{packages[package_count].weight});
+                package_count -= 1;
+            }
+
+            std.log.info("package count: {d}/{d}", .{package_count, min_package_count});
+            
+            // create merged packages
+            var merged_package_count: u16 = 0;
+            var merged_packages: [unique_symbols]model.PackageNode = undefined;
+            for (0..package_count) |idx| {
+                if (idx % 2 == 0) {
+                    merged_packages[merged_package_count] = .{};
+                    merged_packages[merged_package_count].mergeWith(packages[idx]);
+                    merged_packages[merged_package_count].mergeWith(packages[idx + 1]);
+                    merged_package_count += 1;
+                    
+                    std.log.info("[{d}] Merge {d} with {d}", .{idx, packages[idx].weight, packages[idx + 1].weight});
+                }
+            }
+
+            std.log.info("done merging {d} packages", .{merged_package_count});
+            std.log.info("current packages {d}", .{package_count});
+            
+            // merge packages
+            package_count = 0;
+            var merged_consumed: u16 = 0;
+            for (original_packages) |original_package| {
+                if (merged_consumed < merged_package_count) {
+                    var merged_package = merged_packages[merged_consumed];
+                    // append merged node while they are smaller
+                    while (merged_consumed < merged_package_count and original_package.weight > merged_package.weight) {
+                        next_packages[package_count] = merged_package;
+                        merged_consumed += 1;
+                        package_count += 1;
+                        merged_package = merged_packages[merged_consumed];
+                    }
+                }
+                
+                //std.log.info("append original: {d}", .{original_package.weight});
+                next_packages[package_count] = original_package;
+                package_count += 1;
+            }
+
+            // append remaining merged because they are all larger than the original packages
+            for (merged_consumed..merged_package_count) |idx| {
+                next_packages[package_count] = merged_packages[idx];
+                merged_consumed += 1;
+                package_count += 1;
+            }
+
+            std.log.info("new package count: {d}", .{package_count});
+            std.log.info("", .{});
+            packages = next_packages;
+            iterations += 1;
+
+            levels[iterations] = next_packages;
+        }
+
+        // TODO debug
+        for (0..package_count) |idx| {
+            var p = packages[idx];
+            std.log.info("package weight: {d}", .{p.weight});
+            for (0..p.symbols.capacity()) |is| {
+                const symbol: u16 = @intCast(is);
+                if (p.contains(symbol)) {
+                    std.log.info("symbol: {d}", .{symbol});
+                }
+            }
+        }
+        
+        std.log.info("iterations: {d}, max length: {d}", .{iterations, iterations + 1});
+
+        // determine code lengths
+        var code_lengths_per_index: [unique_symbols]u4 = [_]u4{0} ** unique_symbols;
+        var package_length = min_package_count;
+        
+        // run through all levels from last to first
+        for (0..iterations + 1) |iter| {
+            var symbol: u16 = 0;
+            var merged_packages: u16 = 0;
+            const level = iterations - iter;
+            std.log.info("check level: {d}, length: {d}", .{level, package_length});
+            const current_packages = levels[level];
+            
+            // run through all packages and count symbols and merged pacakges
+            for (0..package_length) |package_index| {
+                const package = current_packages[package_index];
+                if (package.symbol != null) {
+                    code_lengths_per_index[symbol] += 1;
+                    std.log.info("{d}: {d}", .{symbol, code_lengths_per_index[symbol]});
+                    symbol += 1;
+                } else {
+                    merged_packages += 1;
+                }
+            }
+            std.log.info("merged packages: {d}", .{merged_packages});
+            package_length = 2 * merged_packages;
+        }
+
+        var code_lengths: [unique_symbols]u4 = [_]u4{0} ** unique_symbols;
+        for (0..original_packages.len) |i| {
+            const package = original_packages[i];
+            if (package.symbol) |lit| {
+                code_lengths[lit] = code_lengths_per_index[i];
+            }
+        }
+
+        return code_lengths;
     }
     
     pub fn getLengthCode(length: u16) !model.LDCode {
@@ -230,8 +422,8 @@ test "getDistanceCode" {
 }
 
 test "test fixed prefix codes for block type 01" {
-    var code_lengths: [max_alphabet_symbol]u4 = undefined;
-    for (0..max_alphabet_symbol) |i| {
+    var code_lengths: [unique_symbols]u4 = undefined;
+    for (0..unique_symbols) |i| {
         code_lengths[i] = try PrefixCodes.getFixedCodeLength(i);
     }
 

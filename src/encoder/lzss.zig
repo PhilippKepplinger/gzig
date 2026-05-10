@@ -1,27 +1,31 @@
 const std = @import("std");
 const model = @import("model.zig");
-const Packager = @import("packager.zig").Packager;
+const packager = @import("packager.zig");
 const RingBuffer = @import("ring-buffer.zig").RingBuffer;
+const BitWriter = @import("bit-writer.zig").BitWriter;
+const pc = @import("prefix-codes.zig");
 
 pub const max_lookahead_window: u16 = 258;
 pub const search_buffer_size: u16 = 32768;
 pub const search_buffer_max_index = search_buffer_size - 1;
 
 pub const LZSS = struct {
-    processed_bytes: u64 = 0,
-    ring_buffer: RingBuffer,
-    packager: *Packager,
     allocator: std.mem.Allocator,
+    packager: packager.Packager = undefined,
+    ring_buffer: RingBuffer,
+    processed_bytes: u64 = 0,
+    
     search_progress: u16 = 0,
     current_search: [max_lookahead_window]u8 = undefined,
+    
     hash_head: [search_buffer_size]?u64 = undefined,
     hash_prev: [search_buffer_size]?u64 = undefined,
     max_candidates: u8 = 32,
     
-    pub fn init(allocator: std.mem.Allocator, packager: *Packager, buffer: []u8) !LZSS {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter, buffer: []u8) !LZSS {
         return .{
             .ring_buffer = RingBuffer.init(buffer),
-            .packager = packager,
+            .packager = try packager.Packager.init(io, allocator, bit_writer),
             .allocator = allocator
         };
     }
@@ -29,6 +33,7 @@ pub const LZSS = struct {
     pub fn process(self: *LZSS, literal: u8) !void {
         // add the literal to the ring-buffer and increase the global counter
         self.ring_buffer.add(literal);
+        self.packager.symbol_frequencies[literal] += 1; // this is stupid but works right now...
         self.processed_bytes += 1;
 
         if (self.processed_bytes < 3) {
