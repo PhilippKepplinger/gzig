@@ -33,7 +33,6 @@ pub const LZSS = struct {
     pub fn process(self: *LZSS, literal: u8) !void {
         // add the literal to the ring-buffer and increase the global counter
         self.ring_buffer.add(literal);
-        self.packager.symbol_frequencies[literal] += 1; // this is stupid but works right now...
         self.processed_bytes += 1;
 
         if (self.processed_bytes < 3) {
@@ -130,11 +129,12 @@ pub const LZSS = struct {
             } else if (longest_match < self.search_progress) {
                 // no candidate equals current search, but candidate at least length 3
                 const dist = self.ring_buffer.getDistance(best_candidate_index) - longest_match; // distance from starting symbol index, not current literal index
-                
+
                 try self.packager.add(.{ 
                     .match = .{
-                        .dist = @intCast(dist),
-                        .len = longest_match,
+                        .length = longest_match,
+                        .distance_symbol = try pc.PrefixCodes.getFixedDistanceCode(@intCast(dist)),
+                        .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
                     }
                 });
 
@@ -149,8 +149,9 @@ pub const LZSS = struct {
                 
                 try self.packager.add(.{
                     .match = .{
-                        .dist = @intCast(dist),
-                        .len = longest_match,
+                        .length = longest_match,
+                        .distance_symbol = try pc.PrefixCodes.getFixedDistanceCode(@intCast(dist)),
+                        .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
                     }
                 });
 

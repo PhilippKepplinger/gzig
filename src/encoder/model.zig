@@ -33,7 +33,7 @@ pub const CompressedBlockHeader = packed struct {
 };
 
 pub const LDCode = struct {
-    code: u16,
+    symbol: u16,
     offset: u32,
     extra_bits: u4
 };
@@ -53,8 +53,9 @@ pub const PrefixCode = struct {
 pub const LZToken = union(enum) {
     literal: u8,
     match: struct {
-        len: u16,
-        dist: u16,
+        length: u16,
+        length_symbol: LDCode,
+        distance_symbol: LDCode,
     }
 };
 
@@ -66,22 +67,8 @@ pub const FrequencyToken = struct {
 pub const PackageNode = struct {
     symbol: ?u16 = null,
     weight: u16 = 0,
-    symbols: std.bit_set.IntegerBitSet(288) = std.bit_set.IntegerBitSet(288).initEmpty(),
     
     pub fn mergeWith(self: *PackageNode, other: PackageNode) void {
         self.weight += other.weight;
-        self.symbols.setUnion(other.symbols);
-    }
-    
-    pub fn set(self: *PackageNode, symbol: u16) void {
-        self.symbols.set(symbol);
-    }
-    
-    pub fn contains(self: *PackageNode, symbol: u16) bool {
-        return self.symbols.isSet(symbol);
-    }
-    
-    pub fn firstSymbol(self: *PackageNode) u16 {
-        return @intCast(self.symbols.findFirstSet());
     }
 };

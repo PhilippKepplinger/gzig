@@ -2,6 +2,7 @@ const std = @import("std");
 const model = @import("model.zig");
 
 pub const unique_symbols: u16 = 288;
+pub const unique_distance_codes: u16 = 32;
 pub const max_prefixcode_bits: u8 = 15;
 
 /// lookup table for length codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
@@ -80,14 +81,22 @@ pub const PrefixCodes = struct {
             code_lengths[symbol] = try getFixedCodeLength(symbol);
         }
         
-        return getPrefixCodes(code_lengths);
+        return getLengthLiteralPrefixCodes(code_lengths);
+    }
+
+    pub fn getLengthLiteralPrefixCodes(code_lengths: [unique_symbols]u4) [unique_symbols]model.PrefixCode {
+        return getPrefixCodes(unique_symbols, code_lengths);
+    }
+
+    pub fn getDistancePrefixCodes(code_lengths: [unique_distance_codes]u4) [unique_distance_codes]model.PrefixCode {
+        return getPrefixCodes(unique_distance_codes, code_lengths);
     }
     
     /// standard algorithm for calculating prefix codes according to RFC1951 3.2.2
     /// https://datatracker.ietf.org/doc/html/rfc1951#page-7
-    pub fn getPrefixCodes(code_lengths: [unique_symbols]u4) [unique_symbols]model.PrefixCode {
+    pub fn getPrefixCodes(comptime symbol_count: u16, code_lengths: [symbol_count]u4) [symbol_count]model.PrefixCode {
         const max_bits = std.mem.max(u4, &code_lengths);
-        var prefix_codes: [unique_symbols]model.PrefixCode = undefined;
+        var prefix_codes: [symbol_count]model.PrefixCode = undefined;
 
         // step 1
         // count occurrences of each code length. max 15 bit
@@ -137,7 +146,7 @@ pub const PrefixCodes = struct {
 
     /// fixed code lengths according to RFC1951 3.2.6
     /// https://datatracker.ietf.org/doc/html/rfc1951#page-12
-    pub fn getFixedCodeLength(value: usize) !u4 {
+    fn getFixedCodeLength(value: usize) !u4 {
         if (value <= 143) {
             return 8;
         } else if (value <= 255) {
@@ -152,16 +161,15 @@ pub const PrefixCodes = struct {
     }
     
     /// package-merge algorithm
-    pub fn getCodeLengths(symbol_frequencies: *[unique_symbols]u16) [unique_symbols]u4 {
+    pub fn getCodeLengths(comptime symbol_count: u16, symbol_frequencies: *[symbol_count]u16) [symbol_count]u4 {
         var total_symbols: usize = 0;
-        var frequency_tokens: [unique_symbols]model.PackageNode = undefined;
+        var frequency_tokens: [symbol_count]model.PackageNode = undefined;
         for (0..symbol_frequencies.len) |i| {
             total_symbols += symbol_frequencies[i];
             frequency_tokens[i] = .{
                 .symbol = @intCast(i),
                 .weight = symbol_frequencies[i] 
             };
-            frequency_tokens[i].set(@intCast(i));
         }
         
         std.log.info("total symbols: {d}", .{total_symbols});
@@ -174,11 +182,11 @@ pub const PrefixCodes = struct {
         }.lessThan);
         
         // init list => 1st level
-        var levels: [max_prefixcode_bits][unique_symbols * 2]model.PackageNode = undefined;
+        var levels: [max_prefixcode_bits][symbol_count * 2]model.PackageNode = undefined;
         var package_count: usize = 0;
         var original_packages: []model.PackageNode = undefined; // tracks the original packages
-        var packages: [unique_symbols * 2]model.PackageNode = undefined; // the current package list
-        var next_packages: [unique_symbols * 2]model.PackageNode = undefined; // holds the original with the merged packages
+        var packages: [symbol_count * 2]model.PackageNode = undefined; // the current package list
+        var next_packages: [symbol_count * 2]model.PackageNode = undefined; // holds the original with the merged packages
         var first_non_zero_index: u16 = 0;
         var initialized = false;
         for (frequency_tokens) |package| {
@@ -190,10 +198,22 @@ pub const PrefixCodes = struct {
                 packages[package_count] = package;
                 package_count += 1;
     
-                std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbols.findFirstSet().?, package.weight});
+                std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbol.?, package.weight});
             }
 
             first_non_zero_index += 1;
+        }
+        
+        // two symbols are always code length 1, exit early
+        if (package_count <= 2) {
+            var code_lengths: [symbol_count]u4 = [_]u4{0} ** symbol_count;
+            for (0..package_count) |i| {
+                if (packages[i].symbol) |symbol| {
+                    code_lengths[symbol] = 1;
+                }
+            }
+            
+            return code_lengths;
         }
         
         var iterations: u8 = 0;
@@ -204,19 +224,7 @@ pub const PrefixCodes = struct {
         // package-merge until minimum amount of symbols of packages is reached.
         while (package_count < min_package_count and iterations < max_prefixcode_bits) {
             
-            // TODO debug
-            for (0..package_count) |idx| {
-                var p = packages[idx];
-                std.log.info("package weight: {d}", .{p.weight});
-                for (0..p.symbols.capacity()) |is| {
-                    const symbol: u16 = @intCast(is);
-                    if (p.contains(symbol)) {
-                        std.log.info("symbol: {d}", .{symbol});
-                    }                    
-                }
-            }
-            
-            // odd number, remove least frequent package ?
+            // odd number, remove least frequent package
             if (package_count % 2 == 1) {
                 std.log.info("Discard package: {d}", .{packages[package_count].weight});
                 package_count -= 1;
@@ -226,7 +234,7 @@ pub const PrefixCodes = struct {
             
             // create merged packages
             var merged_package_count: u16 = 0;
-            var merged_packages: [unique_symbols]model.PackageNode = undefined;
+            var merged_packages: [symbol_count]model.PackageNode = undefined;
             for (0..package_count) |idx| {
                 if (idx % 2 == 0) {
                     merged_packages[merged_package_count] = .{};
@@ -276,22 +284,10 @@ pub const PrefixCodes = struct {
             levels[iterations] = next_packages;
         }
 
-        // TODO debug
-        for (0..package_count) |idx| {
-            var p = packages[idx];
-            std.log.info("package weight: {d}", .{p.weight});
-            for (0..p.symbols.capacity()) |is| {
-                const symbol: u16 = @intCast(is);
-                if (p.contains(symbol)) {
-                    std.log.info("symbol: {d}", .{symbol});
-                }
-            }
-        }
-        
         std.log.info("iterations: {d}, max length: {d}", .{iterations, iterations + 1});
 
         // determine code lengths
-        var code_lengths_per_index: [unique_symbols]u4 = [_]u4{0} ** unique_symbols;
+        var code_lengths_per_index: [symbol_count]u4 = [_]u4{0} ** symbol_count;
         var package_length = min_package_count;
         
         // run through all levels from last to first
@@ -302,7 +298,7 @@ pub const PrefixCodes = struct {
             std.log.info("check level: {d}, length: {d}", .{level, package_length});
             const current_packages = levels[level];
             
-            // run through all packages and count symbols and merged pacakges
+            // run through all packages and count symbols and merged packages
             for (0..package_length) |package_index| {
                 const package = current_packages[package_index];
                 if (package.symbol != null) {
@@ -317,7 +313,7 @@ pub const PrefixCodes = struct {
             package_length = 2 * merged_packages;
         }
 
-        var code_lengths: [unique_symbols]u4 = [_]u4{0} ** unique_symbols;
+        var code_lengths: [symbol_count]u4 = [_]u4{0} ** symbol_count;
         for (0..original_packages.len) |i| {
             const package = original_packages[i];
             if (package.symbol) |lit| {
@@ -332,7 +328,7 @@ pub const PrefixCodes = struct {
         const length_lookup = try getLengthCodeLookup(length);
         
         return .{
-            .code = length_lookup.base_code,
+            .symbol = length_lookup.base_code,
             .offset = length - length_lookup.min,
             .extra_bits = length_lookup.extra_bits
         };
@@ -347,17 +343,17 @@ pub const PrefixCodes = struct {
         return error.InvalidLength;
     }
 
-    pub fn getDistanceCode(dist: u32) !model.LDCode {
-        const distance_lookup = try getDistanceCodeLookup(dist);
+    pub fn getFixedDistanceCode(dist: u32) !model.LDCode {
+        const distance_lookup = try getFixedDistanceCodeLookup(dist);
 
         return .{
-            .code = distance_lookup.base_code,
+            .symbol = distance_lookup.base_code,
             .offset = dist - distance_lookup.min,
             .extra_bits = distance_lookup.extra_bits
         };
     }
     
-    fn getDistanceCodeLookup(dist: u32) !model.CodeLookup {
+    fn getFixedDistanceCodeLookup(dist: u32) !model.CodeLookup {
         for (distance_table) |entry| {
             if (dist >= entry.min and dist <= entry.max)
                 return entry;
@@ -374,49 +370,49 @@ const testing = std.testing;
 
 test "getLengthCode" {
     var length_code = try PrefixCodes.getLengthCode(10);
-    try testing.expectEqual(264, length_code.code);
+    try testing.expectEqual(264, length_code.symbol);
     try testing.expectEqual(0, length_code.extra_bits);
     try testing.expectEqual(0, length_code.offset);
 
     length_code = try PrefixCodes.getLengthCode(20);
-    try testing.expectEqual(269, length_code.code);
+    try testing.expectEqual(269, length_code.symbol);
     try testing.expectEqual(2, length_code.extra_bits);
     try testing.expectEqual(1, length_code.offset);
 
     length_code = try PrefixCodes.getLengthCode(95);
-    try testing.expectEqual(278, length_code.code);
+    try testing.expectEqual(278, length_code.symbol);
     try testing.expectEqual(4, length_code.extra_bits);
     try testing.expectEqual(12, length_code.offset);
 
     length_code = try PrefixCodes.getLengthCode(258);
-    try testing.expectEqual(285, length_code.code);
+    try testing.expectEqual(285, length_code.symbol);
     try testing.expectEqual(0, length_code.extra_bits);
     try testing.expectEqual(0, length_code.offset);
 }
 
-test "getDistanceCode" {
-    var distance_code = try PrefixCodes.getDistanceCode(1025);
-    try testing.expectEqual(20, distance_code.code);
+test "getFixedDistanceCode" {
+    var distance_code = try PrefixCodes.getFixedDistanceCode(1025);
+    try testing.expectEqual(20, distance_code.symbol);
     try testing.expectEqual(9, distance_code.extra_bits);
     try testing.expectEqual(0, distance_code.offset);
 
-    distance_code = try PrefixCodes.getDistanceCode(24578);
-    try testing.expectEqual(29, distance_code.code);
+    distance_code = try PrefixCodes.getFixedDistanceCode(24578);
+    try testing.expectEqual(29, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(1, distance_code.offset);
 
-    distance_code = try PrefixCodes.getDistanceCode(9);
-    try testing.expectEqual(6, distance_code.code);
+    distance_code = try PrefixCodes.getFixedDistanceCode(9);
+    try testing.expectEqual(6, distance_code.symbol);
     try testing.expectEqual(2, distance_code.extra_bits);
     try testing.expectEqual(0, distance_code.offset);
 
-    distance_code = try PrefixCodes.getDistanceCode(19260);
-    try testing.expectEqual(28, distance_code.code);
+    distance_code = try PrefixCodes.getFixedDistanceCode(19260);
+    try testing.expectEqual(28, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(2875, distance_code.offset);
     
-    distance_code = try PrefixCodes.getDistanceCode(32768);
-    try testing.expectEqual(29, distance_code.code);
+    distance_code = try PrefixCodes.getFixedDistanceCode(32768);
+    try testing.expectEqual(29, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(8191, distance_code.offset);
 }
@@ -427,7 +423,7 @@ test "test fixed prefix codes for block type 01" {
         code_lengths[i] = try PrefixCodes.getFixedCodeLength(i);
     }
 
-    const code_table = PrefixCodes.getPrefixCodes(code_lengths);
+    const code_table = PrefixCodes.getPrefixCodes(unique_symbols, code_lengths);
 
     try testing.expectEqual(48, code_table[0].code);
     try testing.expectEqual(113, code_table[65].code);
