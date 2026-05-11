@@ -3,6 +3,7 @@ const model = @import("model.zig");
 
 pub const unique_symbols: u16 = 288;
 pub const unique_distance_codes: u16 = 32;
+pub const unique_cl_codes: u8 = 19;
 pub const max_prefixcode_bits: u8 = 15;
 
 /// lookup table for length codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
@@ -90,6 +91,10 @@ pub const PrefixCodes = struct {
 
     pub fn getDistancePrefixCodes(code_lengths: [unique_distance_codes]u4) [unique_distance_codes]model.PrefixCode {
         return getPrefixCodes(unique_distance_codes, code_lengths);
+    }
+    
+    pub fn getCLPrefixCodes(code_lengths: [unique_cl_codes]u4) [unique_cl_codes]model.PrefixCode {
+        return getPrefixCodes(unique_cl_codes, code_lengths);
     }
     
     /// standard algorithm for calculating prefix codes according to RFC1951 3.2.2
@@ -360,6 +365,41 @@ pub const PrefixCodes = struct {
         }
 
         return error.InvalidDistance;
+    }
+    
+    pub fn getCLSymbol(code_length: u16, repetitions: u16) !model.LDCode {
+        std.log.info("code_length: {d}, repetition: {d}", .{code_length, repetitions});
+        // get symbol with no repetition
+        if (repetitions < 3) {
+            return .{
+                .symbol = code_length,
+                .extra_bits = 0,
+                .offset = 0,
+            };
+        }
+        if (code_length != 0 and repetitions <= 6) {
+            return .{
+                .symbol = 16,
+                .extra_bits = 2,
+                .offset = repetitions - 3,
+            };
+        }
+        if (code_length == 0 and repetitions <= 10) {
+            return .{
+                .symbol = 17,
+                .extra_bits = 3,
+                .offset = repetitions - 3,
+            };
+        }
+        if (code_length == 0 and repetitions <= 138) {
+            return .{
+                .symbol = 18,
+                .extra_bits = 7,
+                .offset = repetitions - 11,
+            };
+        }
+        
+        return error.InvalidLengthRepetition;
     }
 };
 
