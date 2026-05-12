@@ -32,6 +32,15 @@ pub const CompressedBlockHeader = packed struct {
     btype: u2 = 0x0, // 0 = uncompressed
 };
 
+/// block type 01 and 01
+pub const DynamicBlockHeader = packed struct {
+    bfinal: u1, // true if last block 
+    btype: u2 = 0x0, // 0 = uncompressed
+    hlit: u5,
+    hdist: u5,
+    hclen: u4,
+};
+
 pub const LDCode = struct {
     symbol: u16,
     offset: u32,

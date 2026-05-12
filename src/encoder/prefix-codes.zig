@@ -109,14 +109,8 @@ pub const PrefixCodes = struct {
         for (code_lengths) |value| {
             bitlength_count[value] += 1;
         }
-
         // remove zero bitlengths
         bitlength_count[0] = 0;
-        for (0..bitlength_count.len) |i| {
-            if (bitlength_count[i] > 0) {
-                std.log.info("{d}: {d}", .{i, bitlength_count[i]});
-            }
-        }
 
         // step 2
         // initialize the start code for each code length with the smallest code
@@ -126,7 +120,6 @@ pub const PrefixCodes = struct {
             // last code + amount of previous bit length codes
             code = (code + bitlength_count[bits - 1]) << 1;
             next_code[bits] = code;
-            std.log.info("bits {d}: start code: {b}", .{bits, code});
         }
 
         // step 3
@@ -166,18 +159,15 @@ pub const PrefixCodes = struct {
     }
     
     /// package-merge algorithm
+    /// see: https://create.stephan-brumme.com/length-limited-prefix-codes/#package-merge
     pub fn getCodeLengths(comptime symbol_count: u16, symbol_frequencies: *[symbol_count]u16) [symbol_count]u4 {
-        var total_symbols: usize = 0;
         var frequency_tokens: [symbol_count]model.PackageNode = undefined;
         for (0..symbol_frequencies.len) |i| {
-            total_symbols += symbol_frequencies[i];
             frequency_tokens[i] = .{
                 .symbol = @intCast(i),
                 .weight = symbol_frequencies[i] 
             };
         }
-        
-        std.log.info("total symbols: {d}", .{total_symbols});
         
         // sort by frequency asc
         std.sort.block(model.PackageNode, &frequency_tokens, {}, struct {
@@ -203,7 +193,7 @@ pub const PrefixCodes = struct {
                 packages[package_count] = package;
                 package_count += 1;
     
-                std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbol.?, package.weight});
+                // std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbol.?, package.weight});
             }
 
             first_non_zero_index += 1;
@@ -231,11 +221,11 @@ pub const PrefixCodes = struct {
             
             // odd number, remove least frequent package
             if (package_count % 2 == 1) {
-                std.log.info("Discard package: {d}", .{packages[package_count].weight});
+                //std.log.info("Discard package: {d}", .{packages[package_count].weight});
                 package_count -= 1;
             }
 
-            std.log.info("package count: {d}/{d}", .{package_count, min_package_count});
+            //std.log.info("package count: {d}/{d}", .{package_count, min_package_count});
             
             // create merged packages
             var merged_package_count: u16 = 0;
@@ -247,12 +237,12 @@ pub const PrefixCodes = struct {
                     merged_packages[merged_package_count].mergeWith(packages[idx + 1]);
                     merged_package_count += 1;
                     
-                    std.log.info("[{d}] Merge {d} with {d}", .{idx, packages[idx].weight, packages[idx + 1].weight});
+                    //std.log.info("[{d}] Merge {d} with {d}", .{idx, packages[idx].weight, packages[idx + 1].weight});
                 }
             }
 
-            std.log.info("done merging {d} packages", .{merged_package_count});
-            std.log.info("current packages {d}", .{package_count});
+            //std.log.info("done merging {d} packages", .{merged_package_count});
+            //std.log.info("current packages {d}", .{package_count});
             
             // merge packages
             package_count = 0;
@@ -281,15 +271,15 @@ pub const PrefixCodes = struct {
                 package_count += 1;
             }
 
-            std.log.info("new package count: {d}", .{package_count});
-            std.log.info("", .{});
+            //std.log.info("new package count: {d}", .{package_count});
+            //std.log.info("", .{});
             packages = next_packages;
             iterations += 1;
 
             levels[iterations] = next_packages;
         }
 
-        std.log.info("iterations: {d}, max length: {d}", .{iterations, iterations + 1});
+        //std.log.info("iterations: {d}, max length: {d}", .{iterations, iterations + 1});
 
         // determine code lengths
         var code_lengths_per_index: [symbol_count]u4 = [_]u4{0} ** symbol_count;
@@ -300,7 +290,7 @@ pub const PrefixCodes = struct {
             var symbol: u16 = 0;
             var merged_packages: u16 = 0;
             const level = iterations - iter;
-            std.log.info("check level: {d}, length: {d}", .{level, package_length});
+            //std.log.info("check level: {d}, length: {d}", .{level, package_length});
             const current_packages = levels[level];
             
             // run through all packages and count symbols and merged packages
@@ -308,13 +298,13 @@ pub const PrefixCodes = struct {
                 const package = current_packages[package_index];
                 if (package.symbol != null) {
                     code_lengths_per_index[symbol] += 1;
-                    std.log.info("{d}: {d}", .{symbol, code_lengths_per_index[symbol]});
+                    //std.log.info("{d}: {d}", .{symbol, code_lengths_per_index[symbol]});
                     symbol += 1;
                 } else {
                     merged_packages += 1;
                 }
             }
-            std.log.info("merged packages: {d}", .{merged_packages});
+            //std.log.info("merged packages: {d}", .{merged_packages});
             package_length = 2 * merged_packages;
         }
 
@@ -326,6 +316,10 @@ pub const PrefixCodes = struct {
             }
         }
 
+        validate(code_lengths[0..]) catch {
+            std.log.err(">>>>>>>>>> code lengths are invalid !!!", .{});
+        };
+        
         return code_lengths;
     }
     
@@ -368,8 +362,8 @@ pub const PrefixCodes = struct {
     }
     
     pub fn getCLSymbol(code_length: u16, repetitions: u16) !model.LDCode {
-        std.log.info("code_length: {d}, repetition: {d}", .{code_length, repetitions});
-        // get symbol with no repetition
+        std.log.info("get cl symbol: code_length: {d}, reps: {d}", .{code_length, repetitions});
+        // get symbol with no repetition => just map
         if (repetitions < 3) {
             return .{
                 .symbol = code_length,
@@ -377,6 +371,7 @@ pub const PrefixCodes = struct {
                 .offset = 0,
             };
         }
+        // literal with repetition => 16
         if (code_length != 0 and repetitions <= 6) {
             return .{
                 .symbol = 16,
@@ -384,6 +379,7 @@ pub const PrefixCodes = struct {
                 .offset = repetitions - 3,
             };
         }
+        // zero with short repetitions => 17
         if (code_length == 0 and repetitions <= 10) {
             return .{
                 .symbol = 17,
@@ -391,6 +387,7 @@ pub const PrefixCodes = struct {
                 .offset = repetitions - 3,
             };
         }
+        // zero with long repetition => 18
         if (code_length == 0 and repetitions <= 138) {
             return .{
                 .symbol = 18,
@@ -400,6 +397,25 @@ pub const PrefixCodes = struct {
         }
         
         return error.InvalidLengthRepetition;
+    }
+    
+    pub fn validate(code_lengths: []u4) !void {
+        var sum: f32 = 0;
+        
+        for (code_lengths) |length| {
+            if (length > 0) {
+                sum += 1.0 / std.math.pow(f32, 2, length);
+            }
+        }
+
+        std.log.info("code_length sum = {}", .{sum});
+        
+        if (sum < 1) {
+            return error.UndersaturatedCodeLenghts;
+        }
+        if (sum > 1) {
+            return error.OversaturatedCodeLengths;
+        }
     }
 };
 
