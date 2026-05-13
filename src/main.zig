@@ -32,12 +32,16 @@ test "salad.txt" {
     try testFile("src/tests/salad.txt", "src/tests/salad.txt.gz");
 }
 
-test "test.txt" {
-    try testFile("src/tests/test.txt", "src/tests/test.txt.gz");
-}
-
 test "duptest.txt" {
     try testFile("src/tests/duptest.txt", "src/tests/duptest.txt.gz");
+}
+
+test "example.txt" {
+    try testFile("src/tests/example.txt", "src/tests/example.txt.gz");
+}
+
+test "test.txt" {
+    try testFile("src/tests/test.txt", "src/tests/test.txt.gz");
 }
 
 test "lorem.txt" {

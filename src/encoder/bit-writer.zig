@@ -45,7 +45,7 @@ pub const BitWriter = struct {
 
     /// writes the first `len` bits of a `u32` into the bit-buffer MSB first
     pub fn writeLengthMSB(self: *BitWriter, value: u32, len: u6) !void {
-        // reverse the bits and then shift all not needed bits out to the right so only `len` bits remain 
+        // reverse the bits and then shift all not needed bits out to the right so only `len` bits remain
         const value_reversed = @bitReverse(value) >> @as(u5, @intCast(32 - len));
         self.bit_buffer |= (@as(u64, value_reversed) << self.bit_count);
         self.bit_count += len;
@@ -63,7 +63,7 @@ pub const BitWriter = struct {
     
     /// Writes the current stored byte buffer to the output writer.
     pub fn flush(self: *BitWriter) !void {
-        std.log.debug("flush bits: {d}", .{self.bit_count});
+        std.log.info("flush bits: {d}", .{self.bit_count});
         
         try self.writeBitBuffer();
         

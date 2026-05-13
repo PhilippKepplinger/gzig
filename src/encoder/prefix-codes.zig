@@ -362,7 +362,7 @@ pub const PrefixCodes = struct {
     }
     
     pub fn getCLSymbol(code_length: u16, repetitions: u16) !model.LDCode {
-        std.log.info("get cl symbol: code_length: {d}, reps: {d}", .{code_length, repetitions});
+        // std.log.info("get cl symbol: code_length: {d}, reps: {d}", .{code_length, repetitions});
         // get symbol with no repetition => just map
         if (repetitions < 3) {
             return .{
