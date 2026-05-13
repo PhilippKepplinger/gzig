@@ -321,7 +321,6 @@ pub const Packager = struct {
             const length = ll_code_lengths[i];
             cl_frequencies[length] += 1;
         }
-
         for (0..30) |i| {
             const length = distance_code_lengths[i];
             cl_frequencies[length] += 1;
@@ -351,8 +350,8 @@ pub const Packager = struct {
         const header = model.DynamicBlockHeader {
             .bfinal = @intFromBool(is_last),
             .btype = 0x02,
-            .hlit = 29, //hlit, 257 - 286 (0 - 29)
-            .hdist = 29, // hdist, 1 - 30 => (0 - 29)
+            .hlit = hlit, // TODO use hlit, 257 - 286 (0 - 29)
+            .hdist = hdist, // TODO use hdist, 1 - 30 => (0 - 29)
             .hclen = hclen
         };
         
@@ -383,9 +382,7 @@ pub const Packager = struct {
         }
         
         // TODO DEBUG, just write all ll and dist codes as literals, special cl stream tokens
-
-        for (0..286) |i| {
-            
+        for (0..ll_codes_used) |i| {
             const length = ll_code_lengths[i];
             const cl_code = cl_codes[length];
             std.log.info("ll frequency [{d}]: {d}", .{i, self.ll_frequencies[i]});
@@ -393,7 +390,7 @@ pub const Packager = struct {
             try self.bit_writer.writeLengthMSB(cl_code.code, cl_code.length);
         }
 
-        for (0..30) |i| {
+        for (0..dist_codes_used) |i| {
             const length = distance_code_lengths[i];
             const cl_code = cl_codes[length];
             std.log.info("dist frequency [{d}]: {d}", .{i, self.distance_frequencies[i]});
