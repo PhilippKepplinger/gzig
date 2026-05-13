@@ -361,8 +361,8 @@ pub const PrefixCodes = struct {
         return error.InvalidDistance;
     }
     
+    // this function is kinda shit, but hey ...
     pub fn getCLSymbol(code_length: u16, repetitions: u16) !model.LDCode {
-        // std.log.info("get cl symbol: code_length: {d}, reps: {d}", .{code_length, repetitions});
         // get symbol with no repetition => just map
         if (repetitions < 3) {
             return .{
@@ -399,6 +399,8 @@ pub const PrefixCodes = struct {
         return error.InvalidLengthRepetition;
     }
     
+    /// verify Kraft–McMillan inequality
+    /// sum: 1 / 2^code_length = 1
     pub fn validate(code_lengths: []u4) !void {
         var sum: f32 = 0;
         
@@ -407,8 +409,6 @@ pub const PrefixCodes = struct {
                 sum += 1.0 / std.math.pow(f32, 2, length);
             }
         }
-
-        std.log.info("code_length sum = {}", .{sum});
         
         if (sum < 1) {
             return error.UndersaturatedCodeLenghts;

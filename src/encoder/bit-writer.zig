@@ -63,8 +63,6 @@ pub const BitWriter = struct {
     
     /// Writes the current stored byte buffer to the output writer.
     pub fn flush(self: *BitWriter) !void {
-        std.log.info("flush bits: {d}", .{self.bit_count});
-        
         try self.writeBitBuffer();
         
         if (self.bit_count != 0) {
