@@ -6,5 +6,5 @@ The output will be a .gz file that is compliant with [RFC-1952](https://datatrac
 ## Stages
 1. [x] Produce a gzip compatible, uncompressed .gz file of the input that can be decoded with `gzip -d`
 2. [x] Get block type 01 (fixed prefix codes) working
-3. [ ] Get block type 10 (dynamic prefix codes) working
+3. [x] Get block type 10 (dynamic prefix codes) working
 4. [ ] Optimize the encoder
