@@ -53,11 +53,12 @@ pub const Packager = struct {
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
         // TODO decide block dynamically and over ranges of the data, not all at once
-        const btype: u2 = 0x02;
+        const btype: u2 = 0x01;
         const tokens = self.lzss_stream[0..self.tokens];
         
         std.log.info("package {d} tokens", .{self.tokens});
-
+        const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+        
         switch (btype) {
             0 => try self.storeUncompressed(tokens, is_last), // TODO doesn't work right now, needs input data reference
             1 => try self.storeFixed(tokens, is_last),
@@ -70,14 +71,24 @@ pub const Packager = struct {
         // reset for new data to come in
         self.literals_read = 0;
         self.tokens = 0;
+
+        // reset frequency counters
+        for (0..self.ll_frequencies.len) |i| {
+            self.ll_frequencies[i] = 0;
+        }
+        for (0..self.distance_frequencies.len) |i| {
+            self.distance_frequencies[i] = 0;
+        }
         
         if (is_last) {
             // flush to byte align the data stream
             std.log.info("flush bit-writer to byte align data stream", .{});
             try self.bit_writer.flush();
         }
-
-        std.log.info("package done", .{});
+        
+        const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+        const duration = start.durationTo(end);
+        std.log.info("packaged in {d}ms", .{duration.toMilliseconds()});
     }
 
     /// block type 00
@@ -135,7 +146,6 @@ pub const Packager = struct {
                 // write length part
                 const length_code = token.match.length_symbol;
                 const length_prefix_code = ll_codes[length_code.symbol];
-                std.log.info("write length code [{d}]: {d}:({b:0>7}), offset: {d}, extra_bits: {d}", .{token.match.length, length_prefix_code.code, length_prefix_code.code, length_code.offset, length_code.extra_bits});
                 try self.bit_writer.writeLengthMSB(length_prefix_code.code, length_prefix_code.length);
                 if (length_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(length_code.offset, length_code.extra_bits);
@@ -143,7 +153,6 @@ pub const Packager = struct {
                 
                 // write distance part
                 const distance_code = token.match.distance_symbol;
-                std.log.info("write distance code: ({b:0>5}), offset: {d}, extra_bits: {d}", .{distance_code.symbol, distance_code.offset, distance_code.extra_bits});
                 try self.bit_writer.writeLengthMSB(distance_code.symbol, distance_code_bits);
                 if (distance_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(distance_code.offset, distance_code.extra_bits);
@@ -337,7 +346,7 @@ pub const Packager = struct {
             }
         }
 
-        // 9. tokens
+         // 9. tokens
          for (tokens) |token| {
             if (token == .literal) {
                 // write literals as prefix codes
@@ -367,13 +376,5 @@ pub const Packager = struct {
         // write EOB
         const eob = ll_codes[eob_symbol];
         try self.bit_writer.writeLengthMSB(eob.code, eob.length);
-        
-        // 7. reset frequency counters
-        for (0..self.ll_frequencies.len) |i| {
-            self.ll_frequencies[i] = 0;
-        }
-        for (0..self.distance_frequencies.len) |i| {
-            self.distance_frequencies[i] = 0;
-        }
     }
 };

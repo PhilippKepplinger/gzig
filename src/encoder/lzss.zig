@@ -18,8 +18,8 @@ pub const LZSS = struct {
     search_progress: u16 = 0,
     current_search: [max_lookahead_window]u8 = undefined,
     
-    hash_head: [search_buffer_size]?u64 = undefined,
-    hash_prev: [search_buffer_size]?u64 = undefined,
+    hash_head: [search_buffer_size]?u64 = @splat(null),
+    hash_prev: [search_buffer_size]?u64 = @splat(null),
     max_candidates: u8 = 32,
     
     pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter, buffer: []u8) !LZSS {
@@ -28,6 +28,11 @@ pub const LZSS = struct {
             .packager = try packager.Packager.init(io, allocator, bit_writer),
             .allocator = allocator
         };
+    }
+
+    /// just for debugging to emit literals only
+    pub fn processLiteral(self: *LZSS, literal: u8) !void {
+        try self.packager.add(.{ .literal = literal });
     }
     
     pub fn process(self: *LZSS, literal: u8) !void {
@@ -46,7 +51,7 @@ pub const LZSS = struct {
         const a = try self.ring_buffer.getOffset(2);
         const b = try self.ring_buffer.getOffset(1);
         const hash = hash3(a, b, literal);
-        const hash_index = self.processed_bytes - 3; // -3 because we have three symbols 
+        const hash_index = self.processed_bytes - 3; // -3 because we have three symbols
         const prev_index = hash_index % self.ring_buffer.len;
         self.hash_prev[prev_index] = self.hash_head[hash];
         self.hash_head[hash] = hash_index;
@@ -69,20 +74,23 @@ pub const LZSS = struct {
                 self.search_progress -= 1;
                 return;
             }
-            
-            var best_candidate_index: u64 = undefined;
+
+            var depth: u8 = 0;
             var longest_match: u16 = 0;
-            var depth: u16 = 0;
+            var best_candidate_index: u64 = undefined;
             
             while (candidate_index != null and depth < self.max_candidates) {
-                // cache is outside the search_buffer, so stop here
-                if (self.processed_bytes - candidate_index.? > self.ring_buffer.len) {
-                    break;
-                }
+                depth += 1;
                 
+                const global_dist = self.processed_bytes - candidate_index.?;
                 const buffer_idx = candidate_index.? % self.ring_buffer.len;
-                const global_dist = self.processed_bytes - candidate_index.?; // distance between current global position and candidate global position
-                                                                       // 
+                
+                // cache is outside the search_buffer, so stop here
+                if (global_dist >= self.ring_buffer.len) {
+                    candidate_index = self.hash_prev[buffer_idx];
+                    continue;
+                }
+
                 // prevents to find candidates in hashes created during the current search
                 if (global_dist <= self.search_progress) {
                     // next candidate
@@ -96,7 +104,6 @@ pub const LZSS = struct {
                     continue;
                 }
 
-                depth += 1;
 
                 // count the actual match length of the candidate
                 var match_len: u16 = 0;
@@ -133,14 +140,17 @@ pub const LZSS = struct {
                 try self.packager.add(.{ 
                     .match = .{
                         .length = longest_match,
-                        .distance_symbol = try pc.PrefixCodes.getFixedDistanceCode(@intCast(dist)),
+                        .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
                         .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
                     }
                 });
-
+                
                 // init new search with the current literal
-                self.current_search[0] = literal;
-                self.search_progress = 1;
+                const remaining = self.search_progress - longest_match;
+                self.search_progress = remaining;
+                for (0..remaining) |i| {
+                    self.current_search[i] = self.current_search[longest_match + i];
+                }
                 
                 //std.log.debug("candidates found, new search: ({s})", .{self.current_search[0..self.search_progress]});
             } else if (longest_match == max_lookahead_window) {
@@ -150,7 +160,7 @@ pub const LZSS = struct {
                 try self.packager.add(.{
                     .match = .{
                         .length = longest_match,
-                        .distance_symbol = try pc.PrefixCodes.getFixedDistanceCode(@intCast(dist)),
+                        .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
                         .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
                     }
                 });

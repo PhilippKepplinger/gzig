@@ -342,8 +342,8 @@ pub const PrefixCodes = struct {
         return error.InvalidLength;
     }
 
-    pub fn getFixedDistanceCode(dist: u32) !model.LDCode {
-        const distance_lookup = try getFixedDistanceCodeLookup(dist);
+    pub fn getDistanceLookupCode(dist: u32) !model.LDCode {
+        const distance_lookup = try getDistanceCodeLookup(dist);
 
         return .{
             .symbol = distance_lookup.base_code,
@@ -352,7 +352,7 @@ pub const PrefixCodes = struct {
         };
     }
     
-    fn getFixedDistanceCodeLookup(dist: u32) !model.CodeLookup {
+    fn getDistanceCodeLookup(dist: u32) !model.CodeLookup {
         for (distance_table) |entry| {
             if (dist >= entry.min and dist <= entry.max)
                 return entry;
@@ -447,27 +447,27 @@ test "getLengthCode" {
 }
 
 test "getFixedDistanceCode" {
-    var distance_code = try PrefixCodes.getFixedDistanceCode(1025);
+    var distance_code = try PrefixCodes.getDistanceLookupCode(1025);
     try testing.expectEqual(20, distance_code.symbol);
     try testing.expectEqual(9, distance_code.extra_bits);
     try testing.expectEqual(0, distance_code.offset);
 
-    distance_code = try PrefixCodes.getFixedDistanceCode(24578);
+    distance_code = try PrefixCodes.getDistanceLookupCode(24578);
     try testing.expectEqual(29, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(1, distance_code.offset);
 
-    distance_code = try PrefixCodes.getFixedDistanceCode(9);
+    distance_code = try PrefixCodes.getDistanceLookupCode(9);
     try testing.expectEqual(6, distance_code.symbol);
     try testing.expectEqual(2, distance_code.extra_bits);
     try testing.expectEqual(0, distance_code.offset);
 
-    distance_code = try PrefixCodes.getFixedDistanceCode(19260);
+    distance_code = try PrefixCodes.getDistanceLookupCode(19260);
     try testing.expectEqual(28, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(2875, distance_code.offset);
     
-    distance_code = try PrefixCodes.getFixedDistanceCode(32768);
+    distance_code = try PrefixCodes.getDistanceLookupCode(32768);
     try testing.expectEqual(29, distance_code.symbol);
     try testing.expectEqual(13, distance_code.extra_bits);
     try testing.expectEqual(8191, distance_code.offset);

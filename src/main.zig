@@ -52,6 +52,34 @@ test "DSC01560.jpg" {
     try testFile("src/tests/DSC01560.jpg", "src/tests/DSC01560.jpg.gz");
 }
 
+test "2-4mb.jpg" {
+    try testFile("test-files/2-4mb.jpg", "test-files/2-4mb.jpg.gz");
+}
+
+test "2-5mb.jpg" {
+    try testFile("test-files/2-5mb.jpg", "test-files/2-5mb.jpg.gz");
+}
+
+test "3-2mb.jpg" {
+    try testFile("test-files/3-2mb.jpg", "test-files/3-2mb.jpg.gz");
+}
+
+test "4-3mb.jpg" {
+    try testFile("test-files/4-3mb.jpg", "test-files/4-3mb.jpg.gz");
+}
+
+test "4-6mb.jpg" {
+    try testFile("test-files/4-6mb.jpg", "test-files/4-6mb.jpg.gz");
+}
+
+test "4-8mb.jpg" {
+    try testFile("test-files/4-8mb.jpg", "test-files/4-8mb.jpg.gz");
+}
+
+test "5mb.jpg" {
+    try testFile("test-files/5mb.jpg", "test-files/5mb.jpg.gz");
+}
+
 fn testFile(input_file_path: []const u8, output_file_path: []const u8) !void {
     const io = testing.io;
     var compressor = encoder.Encoder.init(io, testing.allocator);
@@ -64,15 +92,16 @@ fn testFile(input_file_path: []const u8, output_file_path: []const u8) !void {
     defer input_file.close(io);
     try compressor.encode(input_file_path);
 
-    var buffer: [std.compress.flate.max_window_len]u8 = undefined;
-    const file = try Io.Dir.cwd().openFile(io, output_file_path, .{});
-    var reader_buffer: [1024]u8 = undefined;
-    var reader = file.reader(io, &reader_buffer);
+    
+    var child = try std.process.spawn(io, .{
+        .argv = &[_][]const u8{ "gzip", "-t", "-v",  output_file_path }
+    });
 
-    var decompress = std.compress.flate.Decompress.init(&reader.interface, std.compress.flate.Container.gzip, &buffer);
-    const output = try decompress.reader.readAlloc(testing.allocator, input_file_length);
-    defer testing.allocator.free(output);
+    const term = try child.wait(io);
+    switch (term) {
+        .exited => |code| try testing.expectEqual(0, code),
+        else => try testing.expect(false)
+    }
+
     try Io.Dir.cwd().deleteFile(io, output_file_path);
-
-    try testing.expectEqualDeep(input_content, output);
 }

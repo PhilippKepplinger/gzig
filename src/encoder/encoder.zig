@@ -9,7 +9,7 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const Packager = @import("packager.zig").Packager;
 const lzss = @import("lzss.zig");
 
-pub const read_buffer_size: u16 = 65535;
+pub const read_buffer_size: u16 = 1024;
 pub const search_buffer_size: u32 = 32768;
 
 pub const Encoder = struct {
@@ -69,15 +69,21 @@ pub const Encoder = struct {
 
             if (bytes_read > 0) {
                 const read_chunk = read_buf[0..bytes_read]; // for when read < read_buf.len, usually at EOF
+                self.crc32.update(read_chunk);
                 
                 std.log.info("[last={}] read new chunk from input file: {d}", .{is_last, bytes_read});
+                
+                const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
                 
                 // this is the hot loop
                 for (read_chunk) |literal| {
                    try lzss_encoder.process(literal);
                 }
 
-                self.crc32.update(read_chunk);
+                const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+                const duration = start.durationTo(end);
+                std.log.info("encoding took {d}ms", .{duration.toMilliseconds()});
+                std.log.info("", .{});
             }
             
             if (is_last) {
@@ -94,7 +100,7 @@ pub const Encoder = struct {
         try self.writer.flush(); // flush data to output writer
         
         const duration = std.Io.Timestamp.untilNow(time_start, self.io, std.Io.Clock.real);
-        std.log.warn("encoded in {d} ms", .{duration.toMilliseconds()});
+        std.log.info("encoded input block in {d} ms", .{duration.toMilliseconds()});
     }
 
     fn createOutputFile(self: *Encoder, file_path: []const u8) !Io.File {
