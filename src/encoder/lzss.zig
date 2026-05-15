@@ -18,9 +18,11 @@ pub const LZSS = struct {
     search_progress: u16 = 0,
     current_search: [max_lookahead_window]u8 = undefined,
     
+    search_hash: u32 = 0,
+    hash: u32 = 0,
     hash_head: [search_buffer_size + max_lookahead_window]?u64 = @splat(null),
     hash_prev: [search_buffer_size + max_lookahead_window]?u64 = @splat(null),
-    max_candidates: u8 = 16,
+    max_candidates: u8 = 8,
     
     pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter, buffer: []u8) !LZSS {
         return .{
@@ -48,9 +50,8 @@ pub const LZSS = struct {
         }
         
         // whe have at least 3 symbols, start computing hashes
-        const a = try self.ring_buffer.getOffset(2);
-        const b = try self.ring_buffer.getOffset(1);
-        const hash = hash3(a, b, literal);
+        self.hash = ((self.hash << 8) | literal) & 0xFFFFFF; // rolling 3-byte hash
+        const hash = hashSingle(self.hash);
         const hash_index = self.processed_bytes - 3; // - 3 because we have three symbols
         const prev_index = hash_index % self.ring_buffer.len;
         self.hash_prev[prev_index] = self.hash_head[hash];
@@ -62,7 +63,7 @@ pub const LZSS = struct {
         
         // once we have long enough search, check candidates
         if (self.search_progress >= 3) {
-            const search_hash = hash3(self.current_search[0], self.current_search[1], self.current_search[2]);
+            const search_hash = hash3(self.current_search[0],self.current_search[1], self.current_search[2]);
             var candidate_index = self.hash_head[search_hash];
             
             // no candidates for this 3-char search
@@ -189,15 +190,23 @@ pub const LZSS = struct {
         // package data and clear candidates buffer
         try self.packager.package(true);
     }
-    
+
     /// bit-packed direct hash
     /// creates a hash that fits into u16
     /// does not avoid collisions but is good enough for LZSS
     fn hash3(a: u8, b: u8, c: u8) u16 {
-        return (
-            (@as(u16, a) << 10) ^
-            (@as(u16, b) << 5) ^ 
-            (@as(u16, c))
-        ) & (search_buffer_max_index); // 32767
+        return hashSingle(
+            (@as(u32, a) << 16) |
+            (@as(u32, b) << 8) |
+            @as(u32, c)
+        );
+    }
+
+    /// bit-packed direct hash
+    /// (value & 0xFFFFFF) => only use least significant 24 bits
+    /// (*% 0x1E35A7BD) => mix the value with wrapped multiplication
+    /// (>> 17) extract upper 15 bits
+    fn hashSingle(value: u32) u16 {
+        return @truncate(((value & 0xFFFFFF) *% 0x1E35A7BD) >> 17);
     }
 };

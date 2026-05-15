@@ -53,33 +53,33 @@ test "DSC01560.jpg" {
 }
 
 // These tests reference files not in the repository
-// test "2-4mb.jpg" {
-//     try testFile("test-files/2-4mb.jpg", "test-files/2-4mb.jpg.gz");
-// }
-// 
-// test "2-5mb.jpg" {
-//     try testFile("test-files/2-5mb.jpg", "test-files/2-5mb.jpg.gz");
-// }
-// 
-// test "3-2mb.jpg" {
-//     try testFile("test-files/3-2mb.jpg", "test-files/3-2mb.jpg.gz");
-// }
-// 
-// test "4-3mb.jpg" {
-//     try testFile("test-files/4-3mb.jpg", "test-files/4-3mb.jpg.gz");
-// }
-// 
-// test "4-6mb.jpg" {
-//     try testFile("test-files/4-6mb.jpg", "test-files/4-6mb.jpg.gz");
-// }
-// 
-// test "4-8mb.jpg" {
-//     try testFile("test-files/4-8mb.jpg", "test-files/4-8mb.jpg.gz");
-// }
-// 
-// test "5mb.jpg" {
-//     try testFile("test-files/5mb.jpg", "test-files/5mb.jpg.gz");
-// }
+test "2-4mb.jpg" {
+    try testFile("test-files/2-4mb.jpg", "test-files/2-4mb.jpg.gz");
+}
+
+test "2-5mb.jpg" {
+    try testFile("test-files/2-5mb.jpg", "test-files/2-5mb.jpg.gz");
+}
+
+test "3-2mb.jpg" {
+    try testFile("test-files/3-2mb.jpg", "test-files/3-2mb.jpg.gz");
+}
+
+test "4-3mb.jpg" {
+    try testFile("test-files/4-3mb.jpg", "test-files/4-3mb.jpg.gz");
+}
+
+test "4-6mb.jpg" {
+    try testFile("test-files/4-6mb.jpg", "test-files/4-6mb.jpg.gz");
+}
+
+test "4-8mb.jpg" {
+    try testFile("test-files/4-8mb.jpg", "test-files/4-8mb.jpg.gz");
+}
+
+test "5mb.jpg" {
+    try testFile("test-files/5mb.jpg", "test-files/5mb.jpg.gz");
+}
 
 fn testFile(input_file_path: []const u8, output_file_path: []const u8) !void {
     const io = testing.io;

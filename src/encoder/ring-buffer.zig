@@ -68,7 +68,7 @@ pub const RingBuffer = struct {
             } else {
                 return self.buffer[pos];
             }
-        } 
+        }
          
         return error.OutOfRange;
     }
