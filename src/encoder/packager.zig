@@ -31,7 +31,7 @@ pub const Packager = struct {
     
     pub fn add(self: *Packager, token: model.LZToken) !void {
         const consumed = if (token == .literal) 1 else token.match.length;
-        
+
         // if this token would exceed buffer limit => package first
         if (self.literals_read + consumed >= max_uncompressed_length) {
             try self.package(false);
@@ -53,7 +53,7 @@ pub const Packager = struct {
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
         // TODO decide block dynamically and over ranges of the data, not all at once
-        const btype: u2 = 0x01;
+        const btype: u2 = 0x02;
         const tokens = self.lzss_stream[0..self.tokens];
         
         std.log.info("package {d} tokens", .{self.tokens});

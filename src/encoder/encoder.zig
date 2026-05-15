@@ -9,7 +9,7 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const Packager = @import("packager.zig").Packager;
 const lzss = @import("lzss.zig");
 
-pub const read_buffer_size: u16 = 1024;
+pub const read_buffer_size: u16 = 65535;
 pub const search_buffer_size: u32 = 32768;
 
 pub const Encoder = struct {
@@ -55,7 +55,7 @@ pub const Encoder = struct {
         try self.bit_writer.flush();
 
         // init encoder
-        var lzss_buffer: [lzss.search_buffer_size]u8 = undefined;
+        var lzss_buffer: [lzss.search_buffer_size + lzss.max_lookahead_window]u8 = undefined;
         var lzss_encoder = try lzss.LZSS.init(self.io, self.allocator, &self.bit_writer, &lzss_buffer);
         
         // write blocks per block to file

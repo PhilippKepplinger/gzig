@@ -18,9 +18,9 @@ pub const LZSS = struct {
     search_progress: u16 = 0,
     current_search: [max_lookahead_window]u8 = undefined,
     
-    hash_head: [search_buffer_size]?u64 = @splat(null),
-    hash_prev: [search_buffer_size]?u64 = @splat(null),
-    max_candidates: u8 = 32,
+    hash_head: [search_buffer_size + max_lookahead_window]?u64 = @splat(null),
+    hash_prev: [search_buffer_size + max_lookahead_window]?u64 = @splat(null),
+    max_candidates: u8 = 16,
     
     pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter, buffer: []u8) !LZSS {
         return .{
@@ -51,7 +51,7 @@ pub const LZSS = struct {
         const a = try self.ring_buffer.getOffset(2);
         const b = try self.ring_buffer.getOffset(1);
         const hash = hash3(a, b, literal);
-        const hash_index = self.processed_bytes - 3; // -3 because we have three symbols
+        const hash_index = self.processed_bytes - 3; // - 3 because we have three symbols
         const prev_index = hash_index % self.ring_buffer.len;
         self.hash_prev[prev_index] = self.hash_head[hash];
         self.hash_head[hash] = hash_index;
@@ -68,25 +68,26 @@ pub const LZSS = struct {
             // no candidates for this 3-char search
             if (candidate_index == null) {
                 // emit first search char and shift others to left, then wait for next literal
-                try self.packager.add(.{ .literal = literal });
-                self.current_search[0] = self.current_search[1];
-                self.current_search[1] = self.current_search[2];
+                try self.packager.add(.{ .literal = self.current_search[0] });
+                for (0..self.search_progress) |i| {
+                    self.current_search[i] = self.current_search[i + 1];
+                }
                 self.search_progress -= 1;
                 return;
             }
 
-            var depth: u8 = 0;
             var longest_match: u16 = 0;
+            var checked_candidates: u8 = 0;
             var best_candidate_index: u64 = undefined;
             
-            while (candidate_index != null and depth < self.max_candidates) {
-                depth += 1;
+            while (candidate_index != null and checked_candidates < self.max_candidates) {
+                checked_candidates += 1;
                 
                 const global_dist = self.processed_bytes - candidate_index.?;
                 const buffer_idx = candidate_index.? % self.ring_buffer.len;
                 
-                // cache is outside the search_buffer, so stop here
-                if (global_dist >= self.ring_buffer.len) {
+                // cache is outside the search_buffer => skip
+                if (global_dist >= search_buffer_size) {
                     candidate_index = self.hash_prev[buffer_idx];
                     continue;
                 }
@@ -103,7 +104,6 @@ pub const LZSS = struct {
                     }
                     continue;
                 }
-
 
                 // count the actual match length of the candidate
                 var match_len: u16 = 0;
@@ -130,12 +130,17 @@ pub const LZSS = struct {
             if (longest_match < 3) {
                 // emit first search char and shift others to left, then wait for next literal
                 try self.packager.add(.{ .literal = self.current_search[0] });
-                self.current_search[0] = self.current_search[1];
-                self.current_search[1] = self.current_search[2];
+                // shift whole search one index down
+                for (0..self.search_progress) |i| {
+                    self.current_search[i] = self.current_search[i + 1];
+                }
                 self.search_progress -= 1;
             } else if (longest_match < self.search_progress) {
                 // no candidate equals current search, but candidate at least length 3
-                const dist = self.ring_buffer.getDistance(best_candidate_index) - longest_match; // distance from starting symbol index, not current literal index
+                const dist = self.ring_buffer.getDistance(best_candidate_index) - self.search_progress + 1; // distance from starting symbol index (go back search_progress + 1), not current literal index
+                if (dist > search_buffer_size) {
+                    return error.DistanceOutOfRange;
+                }
 
                 try self.packager.add(.{ 
                     .match = .{
@@ -174,13 +179,11 @@ pub const LZSS = struct {
     /// no data will be added anymore to the buffer
     /// run through the rest of the lookahead data and then package
     pub fn finish(self: *LZSS) !void {
-        std.log.debug("finish LZSS encoding", .{});
+        std.log.info("finish LZSS encoding", .{});
         // if there is search progress, just emit literals for testing now...
         // TODO should also check for current candidates later
-        if (self.search_progress > 0) {
-            for (self.current_search[0..self.search_progress]) |literal| {
-                try self.packager.add(.{ .literal = literal });
-            }
+        for (self.current_search[0..self.search_progress]) |literal| {
+            try self.packager.add(.{ .literal = literal });
         }
 
         // package data and clear candidates buffer
