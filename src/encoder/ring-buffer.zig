@@ -47,6 +47,14 @@ pub const RingBuffer = struct {
         return self.buffer[index % self.buffer.len];
     }
     
+    pub fn getTri(self: *RingBuffer, index: usize) u32 {
+        return @truncate(
+            @as(u32, self.buffer[index % self.buffer.len]) << 16 |
+            @as(u32, self.buffer[(index + 1) % self.buffer.len]) << 8 |
+            @as(u32, self.buffer[(index + 2) % self.buffer.len])
+        );
+    }
+    
     pub fn getDistance(self: *RingBuffer, index: usize) usize {
         if (index < self.current_pos) {
             return self.current_pos - index;
@@ -55,22 +63,18 @@ pub const RingBuffer = struct {
         return self.buffer.len - (index - self.current_pos);
     }
     
-    pub fn getOffset(self: *RingBuffer, offset: usize) !u8 {
-        if (offset <= self.current_pos) {
-            @branchHint(BranchHint.likely);
-            return self.buffer[self.current_pos - offset];
-        } 
-
-        if (offset < self.len) {
-            const pos = self.buffer.len + self.current_pos - offset;
-            if (pos >= self.filled) {
-                return error.OutOfRange;
-            } else {
-                return self.buffer[pos];
+    pub fn getMatchLen(self: *RingBuffer, index_a: u64, index_b: u64, length: u16) u16 {
+        var match_len: u16 = 0;
+        for (0..length) |i| {
+            // check missmatch
+            if (self.buffer[(index_a + i) % self.buffer.len] != self.buffer[(index_b + i) % self.buffer.len]) {
+                return match_len;
             }
+
+            match_len += 1;
         }
-         
-        return error.OutOfRange;
+        
+        return match_len;
     }
 };
 
@@ -125,30 +129,6 @@ test "getCurrent" {
     ring_buffer.add(2);
     ring_buffer.add(3);
     try std.testing.expectEqual(3, ring_buffer.getCurrent());
-}
-
-test "getOffset" {
-    var buffer: [4]u8 = undefined;
-    var ring_buffer = RingBuffer.init(buffer[0..]);
-
-    ring_buffer.add(1);
-    ring_buffer.add(2);
-    ring_buffer.add(3);
-    try std.testing.expectEqual(3, ring_buffer.getOffset(0));
-    try std.testing.expectEqual(2, ring_buffer.getOffset(1));
-    try std.testing.expectEqual(1, ring_buffer.getOffset(2));
-    try std.testing.expectError(error.OutOfRange, ring_buffer.getOffset(3));
-
-    ring_buffer.add(4);
-    try std.testing.expectEqual(1, ring_buffer.getOffset(3));
-    try std.testing.expectError(error.OutOfRange, ring_buffer.getOffset(4));
-
-    ring_buffer.add(5);
-    ring_buffer.add(6);
-    try std.testing.expectEqual(6, ring_buffer.getOffset(0));
-    try std.testing.expectEqual(5, ring_buffer.getOffset(1));
-    try std.testing.expectEqual(4, ring_buffer.getOffset(2));
-    try std.testing.expectEqual(3, ring_buffer.getOffset(3));
 }
 
 test "getDistance" {

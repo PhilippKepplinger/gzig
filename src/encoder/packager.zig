@@ -56,7 +56,6 @@ pub const Packager = struct {
         const btype: u2 = 0x02;
         const tokens = self.lzss_stream[0..self.tokens];
         
-        std.log.info("package {d} tokens", .{self.tokens});
         const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
         
         switch (btype) {
@@ -67,7 +66,18 @@ pub const Packager = struct {
                 return error.UnsupportedBlockType;
             }
         }
+
+        if (is_last) {
+            // flush to byte align the data stream
+            std.log.info("flush bit-writer to byte align data stream", .{});
+            try self.bit_writer.flush();
+        }
         
+        const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+        const duration = start.durationTo(end);
+        std.log.info("packaged {d} tokens in {d}ms", .{self.tokens, duration.toMilliseconds()});
+
+
         // reset for new data to come in
         self.literals_read = 0;
         self.tokens = 0;
@@ -79,16 +89,6 @@ pub const Packager = struct {
         for (0..self.distance_frequencies.len) |i| {
             self.distance_frequencies[i] = 0;
         }
-        
-        if (is_last) {
-            // flush to byte align the data stream
-            std.log.info("flush bit-writer to byte align data stream", .{});
-            try self.bit_writer.flush();
-        }
-        
-        const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
-        const duration = start.durationTo(end);
-        std.log.info("packaged in {d}ms", .{duration.toMilliseconds()});
     }
 
     /// block type 00
