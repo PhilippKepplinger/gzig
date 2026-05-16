@@ -7,26 +7,29 @@ const pc = @import("prefix-codes.zig");
 
 pub const max_lookahead_window: u16 = 258;
 pub const search_buffer_size: u16 = 32768;
+pub const max_lookback_distance: u16 = search_buffer_size - max_lookahead_window;
 pub const hash_size: u16 = (search_buffer_size - 1) * 2 + 1;
 pub const search_buffer_max_index = search_buffer_size - 1;
+
+const LZSSRingBuffer = RingBuffer(search_buffer_size);
 
 pub const LZSS = struct {
     allocator: std.mem.Allocator,
     packager: packager.Packager = undefined,
-    ring_buffer: RingBuffer,
     processed_bytes: u64 = 0,
+    ring_buffer: LZSSRingBuffer,
     
     search_index: usize = 2, // start at the 3rd symbol
     search_progress: u16 = 0,
     
     hash: u32 = 0,
     hash_head: [hash_size]?u64 = @splat(null),
-    hash_prev: [search_buffer_size + max_lookahead_window]?u64 = @splat(null),
+    hash_prev: [search_buffer_size]?u64 = @splat(null),
     max_candidates: u8 = 8,
     
-    pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter, buffer: []u8) !LZSS {
+    pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter) LZSS {
         return .{
-            .ring_buffer = RingBuffer.init(buffer),
+            .ring_buffer = .{},
             .packager = try packager.Packager.init(io, allocator, bit_writer),
             .allocator = allocator
         };
@@ -86,13 +89,13 @@ pub const LZSS = struct {
                 
                 // cache is outside the search_buffer => skip
                 // cache inside current search => skip
-                if (global_dist >= search_buffer_size or global_dist <= self.search_progress) {
+                if (global_dist >= max_lookback_distance or global_dist <= self.search_progress) {
                     candidate_index = self.hash_prev[buffer_idx];
                     continue;
                 }
 
                 // count the actual match length of the candidate
-                const match_len= self.ring_buffer.getMatchLen(self.search_index, buffer_idx, self.search_progress);
+                const match_len = self.ring_buffer.getMatchLen(self.search_index, buffer_idx, self.search_progress);
 
                 // remember best match
                 if (match_len > longest_match) {

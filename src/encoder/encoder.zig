@@ -55,8 +55,7 @@ pub const Encoder = struct {
         try self.bit_writer.flush();
 
         // init encoder
-        var lzss_buffer: [lzss.search_buffer_size + lzss.max_lookahead_window]u8 = undefined;
-        var lzss_encoder = try lzss.LZSS.init(self.io, self.allocator, &self.bit_writer, &lzss_buffer);
+        var lzss_encoder = lzss.LZSS.init(self.io, self.allocator, &self.bit_writer);
         
         // write blocks per block to file
         var read_buf: [read_buffer_size]u8 = undefined;
