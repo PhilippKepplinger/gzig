@@ -4,6 +4,11 @@ const BranchHint = std.builtin.BranchHint;
 /// simple ring buffer that continuously fills the given buffer
 /// tracks current position and how much of the buffer is currently set
 pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
+    // needs to be power of two for efficiency
+    std.debug.assert(std.math.isPowerOfTwo(BUFFER_SIZE));
+    
+    const BUFFER_MASK = BUFFER_SIZE - 1; // used to create local index from global index via (& BUFFER_MASK)
+    
     return struct {
         const Self = @This();
         
@@ -18,30 +23,22 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
             self.buffer[self.next_pos] = byte;
             self.buffer[self.next_pos + BUFFER_SIZE] = byte;
             self.current_pos = self.next_pos;
-            self.next_pos = (self.next_pos + 1) & (BUFFER_SIZE - 1); // bitwise & wraps the index
+            self.next_pos = (self.next_pos + 1) & BUFFER_MASK; // bitwise & wraps the index
 
             if (self.filled < BUFFER_SIZE) {
                 self.filled += 1;
             }
         }
 
-        pub fn getCurrent(self: *Self) u8 {
-            return self.buffer[self.current_pos];
-        }
-
-        pub fn getLastSetIndex(self: *Self) usize {
-            return self.current_pos;
-        }
-
         pub fn getAt(self: *Self, index: usize) u8 {
-            return self.buffer[index % BUFFER_SIZE];
+            return self.buffer[index & BUFFER_MASK];
         }
 
-        pub fn getTri(self: *Self, index: usize) u32 {
+        pub fn getTri(self: *Self, index: u16) u32 {
             return @truncate(
-                @as(u32, self.buffer[index % BUFFER_SIZE]) << 16 |
-                    @as(u32, self.buffer[(index + 1) % BUFFER_SIZE]) << 8 |
-                    @as(u32, self.buffer[(index + 2) % BUFFER_SIZE])
+                @as(u32, self.buffer[index]) << 16 |
+                    @as(u32, self.buffer[index + 1]) << 8 |
+                    @as(u32, self.buffer[index + 2])
             );
         }
 
@@ -53,21 +50,16 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
             return BUFFER_SIZE - (index - self.current_pos);
         }
 
-        pub fn getMatchLen(self: *Self, index_a: u64, index_b: u64, length: u16) u16 {
-            const slot_a = index_a % BUFFER_SIZE;
-            const slot_b = index_b % BUFFER_SIZE;
-            
-            var match_len: u16 = 0;
-            for (0..length) |i| {
-                // check missmatch
-                if (self.buffer[slot_a + i] != self.buffer[slot_b + i]) {
-                    return match_len;
-                }
+        pub fn matches(self: *Self, index_a: u16, index_b: u16, length: u16) bool {
+            const slice_a = self.buffer[index_a..index_a + length];
+            const slice_b = self.buffer[index_b..index_b + length];
 
-                match_len += 1;
+            for(0..length) |i| {
+                if (slice_a[i] != slice_b[i])
+                    return false;
             }
-
-            return match_len;
+           
+            return true;
         }
     };
 }
@@ -90,15 +82,6 @@ test "add" {
     try std.testing.expectEqual(4, ring_buffer.filled);
 }
 
-test "getLastSetIndex" {
-    var ring_buffer = RingBuffer(8){};
-
-    ring_buffer.add(1);
-    ring_buffer.add(2);
-    ring_buffer.add(3);
-    try std.testing.expectEqual(2, ring_buffer.getLastSetIndex());
-}
-
 test "getAt" {
     var ring_buffer = RingBuffer(4){};
 
@@ -114,15 +97,6 @@ test "getAt" {
     try std.testing.expectEqual(1, ring_buffer.getAt(4));
 }
 
-test "getCurrent" {
-    var ring_buffer = RingBuffer(8){};
-
-    ring_buffer.add(1);
-    ring_buffer.add(2);
-    ring_buffer.add(3);
-    try std.testing.expectEqual(3, ring_buffer.getCurrent());
-}
-
 test "getDistance" {
     var ring_buffer = RingBuffer(4){};
 
@@ -133,7 +107,7 @@ test "getDistance" {
     ring_buffer.add(5);
     ring_buffer.add(6);
 
-    try std.testing.expectEqual(1, ring_buffer.getLastSetIndex());
+    try std.testing.expectEqual(1, ring_buffer.current_pos);
     try std.testing.expectEqual(1, ring_buffer.getDistance(0));
     try std.testing.expectEqual(4, ring_buffer.getDistance(1));
     try std.testing.expectEqual(3, ring_buffer.getDistance(2));
@@ -145,6 +119,6 @@ test "getDistance 32k" {
 
     ring_buffer.add(1);
 
-    try std.testing.expectEqual(0, ring_buffer.getLastSetIndex());
+    try std.testing.expectEqual(0, ring_buffer.current_pos);
     try std.testing.expectEqual(32768, ring_buffer.getDistance(0));
 }

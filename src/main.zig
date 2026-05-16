@@ -28,6 +28,18 @@ pub fn main(init: std.process.Init) !void {
 
 const testing = std.testing;
 
+test "empty.txt" {
+    try testFile("src/tests/empty.txt", "src/tests/empty.txt.gz");
+}
+
+test "single.txt" {
+    try testFile("src/tests/single.txt", "src/tests/single.txt.gz");
+}
+
+test "double.txt" {
+    try testFile("src/tests/double.txt", "src/tests/double.txt.gz");
+}
+
 test "salad.txt" {
     try testFile("src/tests/salad.txt", "src/tests/salad.txt.gz");
 }

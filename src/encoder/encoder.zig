@@ -10,7 +10,6 @@ const Packager = @import("packager.zig").Packager;
 const lzss = @import("lzss.zig");
 
 pub const read_buffer_size: u16 = 65535;
-pub const search_buffer_size: u32 = 32768;
 
 pub const Encoder = struct {
     io: Io,
@@ -59,8 +58,23 @@ pub const Encoder = struct {
         
         // write blocks per block to file
         var read_buf: [read_buffer_size]u8 = undefined;
+        const input_length = try self.reader.file.length(self.io);
         var is_last = self.reader.atEnd();
-
+        
+        // initialize the up to two symbols because they cannot be used for references anyway
+        // saves some conditions in the hot loop
+        const peek = if (input_length >= 2) 2 else input_length;
+        if (peek > 0) {
+            const initial_data = try self.reader.interface.peek(peek);
+            self.crc32.update(initial_data);
+            
+            for (initial_data) |literal| {
+                try lzss_encoder.processLiteral(literal);
+            }
+            
+            self.reader.interface.toss(peek);
+        }
+        
         // read through file
         while (!is_last) {
             const bytes_read = try self.reader.interface.readSliceShort(&read_buf);
@@ -75,9 +89,7 @@ pub const Encoder = struct {
                 const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
                 
                 // this is the hot loop
-                for (read_chunk) |literal| {
-                   try lzss_encoder.process(literal);
-                }
+                try lzss_encoder.processChunk(read_chunk);
 
                 const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
                 const duration = start.durationTo(end);
@@ -89,8 +101,7 @@ pub const Encoder = struct {
                 try lzss_encoder.finish();
             }
         }
-
-        const input_length = try self.reader.file.length(self.io);
+        
         const footer = try getFooter(self.crc32.final(), input_length);
         log.info("CRC: 0x{X}, ISIZE: 0x{X}", .{ footer.crc32, footer.isize });
         var footer_bytes: [8]u8 = @bitCast(footer);

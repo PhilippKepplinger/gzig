@@ -7,25 +7,30 @@ const pc = @import("prefix-codes.zig");
 
 pub const max_lookahead_window: u16 = 258;
 pub const search_buffer_size: u16 = 32768;
-pub const max_lookback_distance: u16 = search_buffer_size - max_lookahead_window;
-pub const hash_size: u16 = (search_buffer_size - 1) * 2 + 1;
-pub const search_buffer_max_index = search_buffer_size - 1;
+
+const search_buffer_mask: u16 = search_buffer_size - 1;
+const max_lookback_distance: u16 = search_buffer_size - max_lookahead_window;
+const hash_size: u32 = 65536;
+const max_candidate_depth: u8 = 8;
+const max_candidates: u8 = 4;
 
 const LZSSRingBuffer = RingBuffer(search_buffer_size);
 
 pub const LZSS = struct {
     allocator: std.mem.Allocator,
     packager: packager.Packager = undefined,
-    processed_bytes: u64 = 0,
     ring_buffer: LZSSRingBuffer,
     
+    processed_bytes: u64 = 0,
     search_index: usize = 2, // start at the 3rd symbol
-    search_progress: u16 = 0,
+
+    best_candidate_index: u16 = 0,
+    candidate_indices: [max_candidates]?u16 = @splat(null),
+    candidates: u8 = 0,
     
     hash: u32 = 0,
     hash_head: [hash_size]?u64 = @splat(null),
     hash_prev: [search_buffer_size]?u64 = @splat(null),
-    max_candidates: u8 = 8,
     
     pub fn init(io: std.Io, allocator: std.mem.Allocator, bit_writer: *BitWriter) LZSS {
         return .{
@@ -35,117 +40,136 @@ pub const LZSS = struct {
         };
     }
 
-    /// just for debugging to emit literals only
     pub fn processLiteral(self: *LZSS, literal: u8) !void {
-        try self.packager.add(.{ .literal = literal });
-    }
-    
-    pub fn process(self: *LZSS, literal: u8) !void {
-        // add the literal to the ring-buffer and increase the global counter
         self.ring_buffer.add(literal);
         self.processed_bytes += 1;
 
-        if (self.processed_bytes < 3) {
-            // always emit literal, there can be no backreference
-            @branchHint(std.builtin.BranchHint.cold);
-            try self.packager.add(.{ .literal = literal });
-            return;
+        try self.packager.add(.{ .literal = literal });
+    }
+    
+    pub fn processChunk(self: *LZSS, chunk: []u8) !void {
+        for (chunk) |literal| {
+            try self.process(literal);
         }
-        
-        // whe have at least 3 symbols, start computing hashes
-        self.hash = ((self.hash << 8) | literal) & 0xFFFFFF; // rolling 3-byte hash
+    }
+    
+    fn process(self: *LZSS, literal: u8) !void {
+        self.ring_buffer.add(literal);
+        self.processed_bytes += 1;
+
+        // compute hashes
+        self.hash = ((self.hash << 8) | literal) & 0xFFFFFF; // rolling 3-byte hash, (& 0xFFFFFF) limits to 24 bits
         const hash = hashSingle(self.hash);
         const hash_index = self.processed_bytes - 3; // - 3 because we have three symbols
-        const prev_index = hash_index % self.ring_buffer.len;
+        const prev_index = hash_index & search_buffer_mask; // works the same as (% ring_buffer.len)
         self.hash_prev[prev_index] = self.hash_head[hash];
         self.hash_head[hash] = hash_index;
 
         // count search length
-        self.search_progress += 1;
+        const search_progress: u16 = @intCast(self.processed_bytes - self.search_index);
+        if (search_progress < 3) {
+            return;
+        }
         
-        // once we have long enough search, check candidates
-        if (self.search_progress >= 3) {
-            const search_hash = hashSingle(self.ring_buffer.getTri(self.search_index));
-            var candidate_index = self.hash_head[search_hash];
-            
-            // no candidates for this 3-char search
-            if (candidate_index == null) {
-                // emit first search char and shift others to left, then wait for next literal
-                try self.packager.add(.{ .literal = self.ring_buffer.getAt(self.search_index) });
-                self.search_progress -= 1;
-                self.search_index += 1;
-                return;
-            }
+        // we have long enough search, check candidates
+        const search_buffer_index: u16 = @intCast(self.search_index & search_buffer_mask);
+        const search_hash = hashSingle(self.ring_buffer.getTri(search_buffer_index));
+        var candidate_index = self.hash_head[search_hash];
+        
+        // no candidates for this 3-char search
+        if (candidate_index == null) {
+            // emit first search char and advance search_index
+            try self.packager.add(.{ .literal = self.ring_buffer.buffer[search_buffer_index] });
+            self.search_index += 1;
+            return;
+        }
 
-            var longest_match: u16 = 0;
-            var checked_candidates: u8 = 0;
-            var best_candidate_index: u64 = undefined;
-            
-            while (candidate_index != null and checked_candidates < self.max_candidates) {
-                checked_candidates += 1;
-                
+        var has_match = false;
+        var candidate_depth: u8 = 0;
+        
+        // new full 3-byte search, find candidates
+        if (search_progress == 3) {
+            // find all candidates
+            while (candidate_index != null and candidate_depth < max_candidate_depth) {
+                candidate_depth += 1;
+
                 const global_dist = self.processed_bytes - candidate_index.?;
-                const buffer_idx = candidate_index.? % self.ring_buffer.len;
-                
+                const buffer_idx: u16 = @intCast(candidate_index.? & search_buffer_mask);
+
                 // cache is outside the search_buffer => skip
                 // cache inside current search => skip
-                if (global_dist >= max_lookback_distance or global_dist <= self.search_progress) {
+                if (global_dist >= max_lookback_distance or global_dist <= search_progress) {
                     candidate_index = self.hash_prev[buffer_idx];
                     continue;
                 }
 
-                // count the actual match length of the candidate
-                const match_len = self.ring_buffer.getMatchLen(self.search_index, buffer_idx, self.search_progress);
-
-                // remember best match
-                if (match_len > longest_match) {
-                    longest_match = match_len;
-                    best_candidate_index = buffer_idx;
+                // check if the candidate matches
+                const matches = self.ring_buffer.matches(search_buffer_index, buffer_idx, search_progress);
+                if (matches) {
+                    self.candidate_indices[self.candidates] = buffer_idx;
+                    self.candidates += 1;
+                    
+                    // we have enough candidates
+                    if (self.candidates == max_candidates) {
+                        break;
+                    }
                 }
 
                 // next candidate
                 candidate_index = self.hash_prev[buffer_idx];
             }
-            
-            // candidates not good enough
-            if (longest_match < 3) {
-                // emit first search char and shift others to left, then wait for next literal
-                try self.packager.add(.{ .literal = self.ring_buffer.getAt(self.search_index) });
-                self.search_progress -= 1;
-                self.search_index += 1;
-            } else if (longest_match < self.search_progress) {
-                // no candidate equals current search, but candidate at least length 3
-                const dist = self.ring_buffer.getDistance(best_candidate_index) - self.search_progress + 1; // distance from starting symbol index (go back search_progress + 1), not current literal index
-
-                try self.packager.add(.{ 
-                    .match = .{
-                        .length = longest_match,
-                        .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
-                        .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
+        } else {
+            // more than 3-byte search, check existing candidates
+            for (0..self.candidates) |i| {
+                if (self.candidate_indices[self.candidates - i - 1]) |buffer_idx| {
+                    if (self.ring_buffer.getAt(buffer_idx + search_progress) == literal) {
+                        has_match = true;
+                        self.best_candidate_index = buffer_idx;
+                    } else {
+                        self.candidate_indices[i] = null;
                     }
-                });
-                
-                // init new search with the current literal
-                const remaining = self.search_progress - longest_match;
-                self.search_progress = remaining;
-                self.search_index += longest_match;
-                
-            } else if (longest_match == max_lookahead_window) {
-                // max window length reached, stop search and emit candidate
-                const dist = self.ring_buffer.getDistance(best_candidate_index) - self.search_progress + 1; // distance from starting symbol index, not current literal index + 1 because the literal is included in the reference!
-                
-                try self.packager.add(.{
-                    .match = .{
-                        .length = longest_match,
-                        .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
-                        .length_symbol = try pc.PrefixCodes.getLengthCode(longest_match),
-                    }
-                });
-
-                // start new search on next literal
-                self.search_progress = 0;
-                self.search_index += longest_match;
+                }
             }
+        }
+        
+        // no candidate and we are at smallest search, emit first literal and advance search index by 1
+        if (!has_match and search_progress == 3) {
+            // emit first search char and shift others to left, then wait for next literal
+            try self.packager.add(.{ .literal = self.ring_buffer.buffer[search_buffer_index] });
+            self.search_index += 1;
+            self.candidates = 0;
+        } else if (!has_match) {
+            // no matches anymore but search is > 3
+            // we have at least one candidate from the last iteration that had a full match
+            const dist = self.ring_buffer.getDistance(self.best_candidate_index) - search_progress + 1; // distance from starting symbol index (go back search_progress + 1), not current literal index
+
+            try self.packager.add(.{ 
+                .match = .{
+                    .length = search_progress - 1,
+                    .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
+                    .length_symbol = try pc.PrefixCodes.getLengthCode(search_progress - 1),
+                }
+            });
+            
+            // init new search with the current literal
+            self.search_index = self.processed_bytes - 1;
+            self.candidates = 0;
+        } else if (search_progress == max_lookahead_window) {
+            @branchHint(.cold);
+            // max window length reached, stop search and emit candidate
+            // distance from starting symbol index, not current literal, index + 1 because the current literal is included in the reference!
+            const dist = self.ring_buffer.getDistance(self.best_candidate_index) - search_progress + 1;
+            
+            try self.packager.add(.{
+                .match = .{
+                    .length = max_lookahead_window,
+                    .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
+                    .length_symbol = try pc.PrefixCodes.getLengthCode(max_lookahead_window),
+                }
+            });
+
+            // start new search on next literal
+            self.search_index += max_lookahead_window;
         }
     }
 
@@ -155,12 +179,15 @@ pub const LZSS = struct {
         std.log.info("finish LZSS encoding", .{});
         // if there is search progress, just emit literals for testing now...
         // TODO should also check for current candidates later
-        for (0..self.search_progress) |i| {
-            const literal = self.ring_buffer.getAt(self.search_index + i);
-            try self.packager.add(.{ .literal = literal });
+        if (self.processed_bytes > 2) {
+            const search_progress = self.processed_bytes - self.search_index;
+            for (0..search_progress) |i| {
+                const literal = self.ring_buffer.getAt(self.search_index + i);
+                try self.packager.add(.{ .literal = literal });
+            }
+    
         }
-
-        // package data and clear candidates buffer
+        
         try self.packager.package(true);
     }
 
