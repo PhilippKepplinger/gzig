@@ -63,6 +63,8 @@ pub const RingBuffer = struct {
         return self.buffer.len - (index - self.current_pos);
     }
     
+    // TODO this needs to be improved
+    // 1. no modulo anymore
     pub fn getMatchLen(self: *RingBuffer, index_a: u64, index_b: u64, length: u16) u16 {
         var match_len: u16 = 0;
         for (0..length) |i| {
