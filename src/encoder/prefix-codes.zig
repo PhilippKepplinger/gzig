@@ -5,6 +5,7 @@ pub const unique_symbols: u16 = 288;
 pub const unique_distance_codes: u16 = 32;
 pub const unique_cl_codes: u8 = 19;
 pub const max_prefixcode_bits: u8 = 15;
+pub const distance_code_bits: u8 = 5;
 
 /// lookup table for length codes: https://datatracker.ietf.org/doc/html/rfc1951#page-12
 const length_table = [_]model.CodeLookup{
@@ -109,7 +110,7 @@ pub const PrefixCodes = struct {
         for (code_lengths) |value| {
             bitlength_count[value] += 1;
         }
-        // remove zero bitlengths
+        // remove zero bit-lengths
         bitlength_count[0] = 0;
 
         // step 2

@@ -4,9 +4,7 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const pc = @import("prefix-codes.zig");
 
 pub const eob_symbol: u16 = 256;
-pub const max_uncompressed_length: u16 = std.math.maxInt(u16);
-pub const distance_code_bits: u8 = 5;
-
+pub const max_uncompressed_length: u16 = std.math.maxInt(u15);
 
 /// The `Packager` keeps track of a slice of input data and an a list of LZSS encoded tokens.
 /// It can decided what block type matches best given the current LZSS data compared to the raw input.
@@ -53,18 +51,20 @@ pub const Packager = struct {
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
         // TODO decide block dynamically and over ranges of the data, not all at once
-        const btype: u2 = 0x02;
         const tokens = self.lzss_stream[0..self.tokens];
         
         const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
+
+        const savings_from_references = @as(f32, @floatFromInt(self.literals_read - self.tokens));
+        const token_ratio: f32 = savings_from_references / @as(f32, @floatFromInt(self.literals_read));
+        std.log.info("token ratio: {d}, savings: {d}", .{token_ratio, savings_from_references});
         
-        switch (btype) {
-            0 => try self.storeUncompressed(tokens, is_last), // TODO doesn't work right now, needs input data reference
-            1 => try self.storeFixed(tokens, is_last),
-            2 => try self.storeDynamic(tokens, is_last),
-            else => {
-                return error.UnsupportedBlockType;
-            }
+        if (token_ratio > 0.01 or savings_from_references > 256) {
+            std.log.info("store dynamic", .{});
+            try self.storeDynamic(tokens, is_last);
+        } else {
+            std.log.info("store fixed", .{});
+            try self.storeFixed(tokens, is_last);
         }
 
         if (is_last) {
@@ -153,7 +153,7 @@ pub const Packager = struct {
                 
                 // write distance part
                 const distance_code = token.match.distance_symbol;
-                try self.bit_writer.writeLengthMSB(distance_code.symbol, distance_code_bits);
+                try self.bit_writer.writeLengthMSB(distance_code.symbol, pc.distance_code_bits);
                 if (distance_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(distance_code.offset, distance_code.extra_bits);
                 }
