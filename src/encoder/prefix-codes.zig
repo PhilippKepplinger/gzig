@@ -192,8 +192,6 @@ pub const PrefixCodes = struct {
                 }
                 packages[package_count] = package;
                 package_count += 1;
-    
-                // std.log.info("Symbol: {d}, Frequency: {d}", .{package.symbol.?, package.weight});
             }
 
             first_non_zero_index += 1;
@@ -221,12 +219,9 @@ pub const PrefixCodes = struct {
             
             // odd number, remove least frequent package
             if (package_count % 2 == 1) {
-                //std.log.info("Discard package: {d}", .{packages[package_count].weight});
                 package_count -= 1;
             }
 
-            //std.log.info("package count: {d}/{d}", .{package_count, min_package_count});
-            
             // create merged packages
             var merged_package_count: u16 = 0;
             var merged_packages: [symbol_count]model.PackageNode = undefined;
@@ -236,13 +231,9 @@ pub const PrefixCodes = struct {
                     merged_packages[merged_package_count].mergeWith(packages[idx]);
                     merged_packages[merged_package_count].mergeWith(packages[idx + 1]);
                     merged_package_count += 1;
-                    
-                    //std.log.info("[{d}] Merge {d} with {d}", .{idx, packages[idx].weight, packages[idx + 1].weight});
                 }
             }
 
-            //std.log.info("done merging {d} packages", .{merged_package_count});
-            //std.log.info("current packages {d}", .{package_count});
             
             // merge packages
             package_count = 0;
@@ -259,7 +250,6 @@ pub const PrefixCodes = struct {
                     }
                 }
                 
-                //std.log.info("append original: {d}", .{original_package.weight});
                 next_packages[package_count] = original_package;
                 package_count += 1;
             }
@@ -271,15 +261,11 @@ pub const PrefixCodes = struct {
                 package_count += 1;
             }
 
-            //std.log.info("new package count: {d}", .{package_count});
-            //std.log.info("", .{});
             packages = next_packages;
             iterations += 1;
 
             levels[iterations] = next_packages;
         }
-
-        //std.log.info("iterations: {d}, max length: {d}", .{iterations, iterations + 1});
 
         // determine code lengths
         var code_lengths_per_index: [symbol_count]u4 = [_]u4{0} ** symbol_count;
@@ -290,7 +276,6 @@ pub const PrefixCodes = struct {
             var symbol: u16 = 0;
             var merged_packages: u16 = 0;
             const level = iterations - iter;
-            //std.log.info("check level: {d}, length: {d}", .{level, package_length});
             const current_packages = levels[level];
             
             // run through all packages and count symbols and merged packages
@@ -298,13 +283,11 @@ pub const PrefixCodes = struct {
                 const package = current_packages[package_index];
                 if (package.symbol != null) {
                     code_lengths_per_index[symbol] += 1;
-                    //std.log.info("{d}: {d}", .{symbol, code_lengths_per_index[symbol]});
                     symbol += 1;
                 } else {
                     merged_packages += 1;
                 }
             }
-            //std.log.info("merged packages: {d}", .{merged_packages});
             package_length = 2 * merged_packages;
         }
 

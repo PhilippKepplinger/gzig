@@ -193,7 +193,6 @@ pub const Packager = struct {
         var cl_count: u16 = 0;
         var current_code_length: u8 = ll_code_lengths[0];
         var repetitions: u16 = 0;
-        //std.log.info("ll_dist index: 0, current: {d}, new: null. reps: {d}", .{current_code_length, repetitions});
         var covered_symbols: u16 = 0;
 
         for (1..total_ll_dist_symbols) |i| {
@@ -356,7 +355,6 @@ pub const Packager = struct {
                 // write length part
                 const length_code = token.match.length_symbol;
                 const length_prefix_code = ll_codes[length_code.symbol];
-                //std.log.info("write length code [{d}]: {d}:({b:0>7}), offset: {d}, extra_bits: {d}", .{length_prefix_code.code, length_prefix_code.code, length_prefix_code.code, length_code.offset, length_code.extra_bits});
                 try self.bit_writer.writeLengthMSB(length_prefix_code.code, length_prefix_code.length);
                 if (length_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(length_code.offset, length_code.extra_bits);
@@ -365,7 +363,6 @@ pub const Packager = struct {
                 // write distance part
                 const distance_code = token.match.distance_symbol;
                 const distance_prefix_code = distance_codes[distance_code.symbol];
-                //std.log.info("write distance code: ({b:0>5}), offset: {d}, extra_bits: {d}", .{distance_code.symbol, distance_code.offset, distance_code.extra_bits});
                 try self.bit_writer.writeLengthMSB(distance_prefix_code.code, distance_prefix_code.length);
                 if (distance_code.extra_bits > 0) {
                     try self.bit_writer.writeLengthLSB(distance_code.offset, distance_code.extra_bits);

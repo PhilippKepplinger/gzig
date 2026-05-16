@@ -146,14 +146,8 @@ pub const LZSS = struct {
             // no matches anymore but search is > 3
             // we have at least one candidate from the last iteration that had a full match
             const dist = self.ring_buffer.getDistance(self.best_candidate_index) - search_progress + 1; // distance from starting symbol index (go back search_progress + 1), not current literal index
-            
-            try self.packager.add(.{ 
-                .match = .{
-                    .length = search_progress - 1,
-                    .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
-                    .length_symbol = try pc.PrefixCodes.getLengthCode(search_progress - 1),
-                }
-            });
+
+            try self.emitBackReference(@intCast(dist), search_progress - 1);
             
             // init new search with the current literal
             self.search_index = self.processed_bytes - 1;
@@ -164,18 +158,22 @@ pub const LZSS = struct {
             // distance from starting symbol index, not current literal, index + 1 because the current literal is included in the reference!
             const dist = self.ring_buffer.getDistance(self.best_candidate_index) - search_progress + 1;
             
-            try self.packager.add(.{
-                .match = .{
-                    .length = max_lookahead_window,
-                    .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(@intCast(dist)),
-                    .length_symbol = try pc.PrefixCodes.getLengthCode(max_lookahead_window),
-                }
-            });
+            try self.emitBackReference(@intCast(dist), max_lookahead_window);
 
             // start new search on next literal
             self.search_index += max_lookahead_window;
             self.candidates = 0;
         }
+    }
+
+    fn emitBackReference(self: *LZSS, dist: u32, length: u16) !void {
+        try self.packager.add(.{
+            .match = .{
+                .length = length,
+                .distance_symbol = try pc.PrefixCodes.getDistanceLookupCode(dist),
+                .length_symbol = try pc.PrefixCodes.getLengthCode(length),
+            }
+        });
     }
 
     /// no data will be added anymore to the buffer
