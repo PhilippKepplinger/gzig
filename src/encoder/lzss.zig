@@ -61,7 +61,7 @@ pub const LZSS = struct {
         self.hash = ((self.hash << 8) | literal) & 0xFFFFFF; // rolling 3-byte hash, (& 0xFFFFFF) limits to 24 bits
         const hash = hashSingle(self.hash);
         const hash_index = self.processed_bytes - 3; // - 3 because we have three symbols
-        const prev_index = hash_index & search_buffer_mask; // works the same as (% ring_buffer.len)
+        const prev_index = hash_index & search_buffer_mask; // works the same as (% ring_buffer_size)
         self.hash_prev[prev_index] = self.hash_head[hash];
         self.hash_head[hash] = hash_index;
 
@@ -85,33 +85,37 @@ pub const LZSS = struct {
         }
 
         var has_match = false;
-        var candidate_depth: u8 = 0;
         
         // new full 3-byte search, find candidates
         if (search_progress == 3) {
             // find all candidates
-            while (candidate_index != null and candidate_depth < max_candidate_depth) {
+            var candidate_depth: u8 = 0;
+            while (candidate_index) |idx| {
+                if (candidate_depth >= max_candidate_depth) {
+                    break;
+                }
+
                 candidate_depth += 1;
 
-                const global_dist = self.processed_bytes - candidate_index.?;
-                const buffer_idx: u16 = @intCast(candidate_index.? & search_buffer_mask);
+                const global_dist = self.processed_bytes - idx;
+                const buffer_idx: u16 = @intCast(idx & search_buffer_mask);
 
                 // cache is outside the search_buffer => skip
                 // cache inside current search => skip
-                if (global_dist >= max_lookback_distance or global_dist <= search_progress) {
-                    candidate_index = self.hash_prev[buffer_idx];
-                    continue;
-                }
+                if (global_dist < max_lookback_distance and global_dist > search_progress) {
+                    // check if the candidate matches
+                    const matches = self.ring_buffer.matches(search_buffer_index, buffer_idx, search_progress);
+                    if (matches) {
+                        self.candidate_indices[self.candidates] = buffer_idx;
+                        self.candidates += 1;
 
-                // check if the candidate matches
-                const matches = self.ring_buffer.matches(search_buffer_index, buffer_idx, search_progress);
-                if (matches) {
-                    self.candidate_indices[self.candidates] = buffer_idx;
-                    self.candidates += 1;
-                    
-                    // we have enough candidates
-                    if (self.candidates == max_candidates) {
-                        break;
+                        has_match = true;
+                        self.best_candidate_index = buffer_idx;
+
+                        // we have enough candidates
+                        if (self.candidates == max_candidates) {
+                            break;
+                        }
                     }
                 }
 
@@ -121,8 +125,8 @@ pub const LZSS = struct {
         } else {
             // more than 3-byte search, check existing candidates
             for (0..self.candidates) |i| {
-                if (self.candidate_indices[self.candidates - i - 1]) |buffer_idx| {
-                    if (self.ring_buffer.buffer[buffer_idx + search_progress] == literal) {
+                if (self.candidate_indices[i]) |buffer_idx| {
+                    if (self.ring_buffer.buffer[buffer_idx + search_progress - 1] == literal) {
                         has_match = true;
                         self.best_candidate_index = buffer_idx;
                     } else {
@@ -142,7 +146,7 @@ pub const LZSS = struct {
             // no matches anymore but search is > 3
             // we have at least one candidate from the last iteration that had a full match
             const dist = self.ring_buffer.getDistance(self.best_candidate_index) - search_progress + 1; // distance from starting symbol index (go back search_progress + 1), not current literal index
-
+            
             try self.packager.add(.{ 
                 .match = .{
                     .length = search_progress - 1,
@@ -170,6 +174,7 @@ pub const LZSS = struct {
 
             // start new search on next literal
             self.search_index += max_lookahead_window;
+            self.candidates = 0;
         }
     }
 

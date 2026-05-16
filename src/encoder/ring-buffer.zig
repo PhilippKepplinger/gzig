@@ -1,19 +1,19 @@
 const std = @import("std");
-const BranchHint = std.builtin.BranchHint;
 
 /// simple ring buffer that continuously fills the given buffer
 /// tracks current position and how much of the buffer is currently set
 pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
-    // needs to be power of two for efficiency
-    std.debug.assert(std.math.isPowerOfTwo(BUFFER_SIZE));
+    // needs to be power of two for efficient masking
+    std.debug.assert(
+        std.math.isPowerOfTwo(BUFFER_SIZE)
+    );
     
     const BUFFER_MASK = BUFFER_SIZE - 1; // used to create local index from global index via (& BUFFER_MASK) instead of expensive modulo
     
     return struct {
         const Self = @This();
         
-        buffer: [BUFFER_SIZE * 2]u8 = undefined, // creates a mirrored buffer
-        len: usize = BUFFER_SIZE,
+        buffer: [BUFFER_SIZE * 2]u8 = undefined, // 2 * creates a mirrored buffer
         current_pos: usize = undefined,
         next_pos: usize = 0,
 

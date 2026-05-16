@@ -65,14 +65,12 @@ pub const Encoder = struct {
         // saves some conditions in the hot loop
         const peek = if (input_length >= 2) 2 else input_length;
         if (peek > 0) {
-            const initial_data = try self.reader.interface.peek(peek);
+            const initial_data = try self.reader.interface.take(peek);
             self.crc32.update(initial_data);
             
             for (initial_data) |literal| {
                 try lzss_encoder.processLiteral(literal);
             }
-            
-            self.reader.interface.toss(peek);
         }
         
         // read through file
