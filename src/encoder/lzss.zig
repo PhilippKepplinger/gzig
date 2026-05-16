@@ -122,7 +122,7 @@ pub const LZSS = struct {
             // more than 3-byte search, check existing candidates
             for (0..self.candidates) |i| {
                 if (self.candidate_indices[self.candidates - i - 1]) |buffer_idx| {
-                    if (self.ring_buffer.getAt(buffer_idx + search_progress) == literal) {
+                    if (self.ring_buffer.buffer[buffer_idx + search_progress] == literal) {
                         has_match = true;
                         self.best_candidate_index = buffer_idx;
                     } else {
@@ -181,8 +181,9 @@ pub const LZSS = struct {
         // TODO should also check for current candidates later
         if (self.processed_bytes > 2) {
             const search_progress = self.processed_bytes - self.search_index;
+            const search_buffer_index = self.search_index & search_buffer_mask;
             for (0..search_progress) |i| {
-                const literal = self.ring_buffer.getAt(self.search_index + i);
+                const literal = self.ring_buffer.buffer[search_buffer_index + i];
                 try self.packager.add(.{ .literal = literal });
             }
     

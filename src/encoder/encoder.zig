@@ -9,7 +9,7 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const Packager = @import("packager.zig").Packager;
 const lzss = @import("lzss.zig");
 
-pub const read_buffer_size: u16 = 65535;
+pub const read_buffer_size: u32 = 65536;
 
 pub const Encoder = struct {
     io: Io,

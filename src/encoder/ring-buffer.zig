@@ -7,7 +7,7 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
     // needs to be power of two for efficiency
     std.debug.assert(std.math.isPowerOfTwo(BUFFER_SIZE));
     
-    const BUFFER_MASK = BUFFER_SIZE - 1; // used to create local index from global index via (& BUFFER_MASK)
+    const BUFFER_MASK = BUFFER_SIZE - 1; // used to create local index from global index via (& BUFFER_MASK) instead of expensive modulo
     
     return struct {
         const Self = @This();
@@ -16,18 +16,13 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
         len: usize = BUFFER_SIZE,
         current_pos: usize = undefined,
         next_pos: usize = 0,
-        filled: usize = 0,
 
         /// push a single byte into the buffer and advance the current position
         pub fn add(self: *Self, byte: u8) void {
             self.buffer[self.next_pos] = byte;
-            self.buffer[self.next_pos + BUFFER_SIZE] = byte;
+            self.buffer[self.next_pos + BUFFER_SIZE] = byte; // double write for mirrored buffer
             self.current_pos = self.next_pos;
             self.next_pos = (self.next_pos + 1) & BUFFER_MASK; // bitwise & wraps the index
-
-            if (self.filled < BUFFER_SIZE) {
-                self.filled += 1;
-            }
         }
 
         pub fn getAt(self: *Self, index: usize) u8 {
@@ -42,7 +37,8 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
             );
         }
 
-        pub fn getDistance(self: *Self, index: usize) usize {
+        pub fn getDistance(self: *Self, index: u16) usize {
+            // return (self.current_pos -% index) & BUFFER_MASK;
             if (index < self.current_pos) {
                 return self.current_pos - index;
             }
@@ -54,7 +50,7 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
             const slice_a = self.buffer[index_a..index_a + length];
             const slice_b = self.buffer[index_b..index_b + length];
 
-            for(0..length) |i| {
+            for (0..length) |i| {
                 if (slice_a[i] != slice_b[i])
                     return false;
             }
@@ -72,14 +68,12 @@ test "add" {
     try std.testing.expectEqual(1, ring_buffer.buffer[0]);
     try std.testing.expectEqual(2, ring_buffer.buffer[1]);
     try std.testing.expectEqual(2, ring_buffer.next_pos);
-    try std.testing.expectEqual(2, ring_buffer.filled);
 
     ring_buffer.add(3);
     ring_buffer.add(4);
     try std.testing.expectEqual(3, ring_buffer.buffer[2]);
     try std.testing.expectEqual(4, ring_buffer.buffer[3]);
     try std.testing.expectEqual(0, ring_buffer.next_pos);
-    try std.testing.expectEqual(4, ring_buffer.filled);
 }
 
 test "getAt" {
