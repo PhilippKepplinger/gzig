@@ -11,8 +11,8 @@ pub const search_buffer_size: u16 = 32768;
 const search_buffer_mask: u16 = search_buffer_size - 1;
 const max_lookback_distance: u16 = search_buffer_size - max_lookahead_window;
 const hash_size: u32 = 65536;
-const max_candidate_depth: u8 = 12;
-const max_candidates: u8 = 8;
+const max_candidate_depth: u8 = 16;
+const max_candidates: u8 = 16;
 
 const LZSSRingBuffer = RingBuffer(search_buffer_size);
 
@@ -46,6 +46,7 @@ pub const LZSS = struct {
     }
 
     pub fn processLiteral(self: *LZSS, literal: u8) !void {
+        self.packager.trackLiteral(literal);
         self.ring_buffer.add(literal);
         self.processed_bytes += 1;
 
@@ -74,6 +75,9 @@ pub const LZSS = struct {
         } else if (ratio < 0.1) {
             self.candidate_depth_limit = 8;
             self.candidate_save_limit = 8;
+        }  else if (ratio < 0.2) {
+            self.candidate_depth_limit = 12;
+            self.candidate_save_limit = 12;
         } else {
             self.candidate_depth_limit = max_candidate_depth;
             self.candidate_save_limit = max_candidates;
@@ -81,6 +85,7 @@ pub const LZSS = struct {
     }
     
     fn process(self: *LZSS, literal: u8) !void {
+        self.packager.trackLiteral(literal);
         self.ring_buffer.add(literal);
         self.processed_bytes += 1;
 
@@ -221,7 +226,7 @@ pub const LZSS = struct {
     /// no data will be added anymore to the buffer
     /// run through the rest of the lookahead data and then package
     pub fn finish(self: *LZSS) !void {
-        std.log.info("finish LZSS encoding", .{});
+        std.log.debug("finish LZSS encoding", .{});
 
         if (self.processed_bytes > 2) {
             const search_progress: u16 = @intCast(self.processed_bytes - self.search_index);

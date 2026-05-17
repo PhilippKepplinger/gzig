@@ -72,6 +72,15 @@ pub const BitWriter = struct {
         }
     }
     
+    pub fn zeroPad(self: *BitWriter) !void {
+        const padding = 8 - (self.bit_count & 0b111);
+        
+        if (padding > 0 and padding < 8) {
+            std.log.debug("padding {d}", .{padding});
+            try self.writeLengthLSB(0, padding);
+        }
+    }
+    
     fn checkBitBuffer(self: *BitWriter) !void {
         // only write once buffer is half full
         if (self.bit_count >= 32) {

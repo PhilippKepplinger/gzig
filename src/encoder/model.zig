@@ -19,7 +19,7 @@ pub const GzFooter = packed struct {
 
 /// block type 00
 pub const UncompressedBlockHeader = packed struct {
-    bfinal: bool, // true if last block 
+    bfinal: u1, // true if last block 
     btype: u2 = 0x0, // 0 = uncompressed
     padding: u5 = 0x0, // fixed 5 bits zero padding
     len: u16, // length of the data

@@ -4,7 +4,11 @@ const BitWriter = @import("bit-writer.zig").BitWriter;
 const pc = @import("prefix-codes.zig");
 
 pub const eob_symbol: u16 = 256;
-pub const max_uncompressed_length: u16 = std.math.maxInt(u15);
+pub const max_uncompressed_length: u16 = 32767;
+pub const package_threshold: u32 = 65535;
+
+const store_threshold = 0.01;
+const fixed_threshold = 0.015;
 
 /// The `Packager` keeps track of a slice of input data and an a list of LZSS encoded tokens.
 /// It can decided what block type matches best given the current LZSS data compared to the raw input.
@@ -12,9 +16,13 @@ pub const Packager = struct {
     io: std.Io,
     bit_writer: *BitWriter,
     allocator: std.mem.Allocator,
-    literals_read: u32 = 0,
+
+    literal_stream: [package_threshold + 512]u8 = undefined, // tracks literals for potential stored blocks (+ overflow buffer)
+    literals: u32 = 0, // how many literals are tracked
+
     tokens: u32 = 0,
-    lzss_stream: [max_uncompressed_length]model.LZToken = undefined,
+    lzss_stream: [package_threshold]model.LZToken = undefined,
+    literals_read: u32 = 0, // how many literals the lzss token stream represents
 
     ll_frequencies: [pc.unique_symbols]u16 = @splat(0),
     distance_frequencies: [pc.unique_distance_codes]u16 = @splat(0),
@@ -27,11 +35,22 @@ pub const Packager = struct {
         };
     }
     
+    pub fn trackLiteral(self: *Packager, literal: u8) void {
+        self.literal_stream[self.literals] = literal;
+        self.literals += 1;
+    }
+    
+    /// add a new token to the LZ Token stream
     pub fn add(self: *Packager, token: model.LZToken) !void {
         const consumed = if (token == .literal) 1 else token.match.length;
 
         // if this token would exceed buffer limit => package first
-        if (self.literals_read + consumed >= max_uncompressed_length) {
+        if (self.literals_read <= max_uncompressed_length and self.literals_read + consumed > max_uncompressed_length) {
+            try self.checkStoreUncompressed();
+        }
+        
+        // if this token would exceed buffer limit => package first
+        if (self.literals_read + consumed >= package_threshold) {
             try self.package(false);
         }
         
@@ -48,35 +67,74 @@ pub const Packager = struct {
         self.tokens += 1;
     }
     
+    pub fn checkStoreUncompressed(self: *Packager) !void {
+        if (self.getTokenRatio() <= store_threshold) {
+            try self.storeUncompressed(self.literal_stream[0..self.literals_read], false);
+        }
+    }
+    
     /// packages the current data into the optimal block types and writes them to the output via the `BitWriter`
     pub fn package(self: *Packager, is_last: bool) !void {
-        // TODO decide block dynamically and over ranges of the data, not all at once
-        const tokens = self.lzss_stream[0..self.tokens];
-        
         const start = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
-
-        const savings_from_references = @as(f32, @floatFromInt(self.literals_read - self.tokens));
-        const token_ratio: f32 = savings_from_references / @as(f32, @floatFromInt(self.literals_read));
-        std.log.info("token ratio: {d}, savings: {d}", .{token_ratio, savings_from_references});
         
-        if (token_ratio > 0.01 or savings_from_references > 256) {
-            std.log.info("store dynamic", .{});
+        const tokens = self.lzss_stream[0..self.tokens];
+        const token_ratio: f32 = self.getTokenRatio();
+        
+        if (self.literals_read > 1024 and token_ratio > fixed_threshold) {
             try self.storeDynamic(tokens, is_last);
         } else {
-            std.log.info("store fixed", .{});
             try self.storeFixed(tokens, is_last);
         }
 
         if (is_last) {
             // flush to byte align the data stream
-            std.log.info("flush bit-writer to byte align data stream", .{});
+            std.log.debug("flush bit-writer to byte align data stream", .{});
             try self.bit_writer.flush();
         }
         
         const end = std.Io.Timestamp.now(self.io, std.Io.Clock.real);
         const duration = start.durationTo(end);
-        std.log.info("packaged {d} tokens in {d}ms", .{self.tokens, duration.toMilliseconds()});
+        std.log.debug("packaged {d} tokens in {d}ms", .{self.tokens, duration.toMilliseconds()});
 
+        self.resetCounters();
+    }
+
+    fn getTokenRatio(self: *Packager) f32 {
+        const savings_from_references = @as(f32, @floatFromInt(self.literals_read - self.tokens));
+        return savings_from_references / @as(f32, @floatFromInt(self.literals_read));
+    }
+    
+    /// block type 00
+    fn storeUncompressed(self: *Packager, data: []u8, is_last: bool) !void {
+        if (data.len > max_uncompressed_length) {
+            return error.BlockLengthExceeded;
+        }
+
+        const length: u16 = @intCast(data.len);
+        
+        const block_header: model.UncompressedBlockHeader = .{
+            .bfinal = @intFromBool(is_last),
+            .len = length,
+            .nlen = ~length
+        };
+        
+        var header_bytes: [5]u8 = @bitCast(block_header);
+        try self.bit_writer.writeBit(block_header.bfinal);
+        try self.bit_writer.writeBits(u2, block_header.btype);
+        try self.bit_writer.zeroPad();
+        try self.bit_writer.writeBytes(header_bytes[1..]);
+        try self.bit_writer.writeBytes(data);
+        
+        self.resetCounters();
+    }
+    
+    fn resetCounters(self: *Packager) void {
+        // shift remaining literal stream back to 0
+        self.literals -= self.literals_read;
+        for (0..self.literals) |i| {
+            // we processed literals_read data, so we shift 
+            self.literal_stream[i] = self.literal_stream[self.literals_read + i];
+        }
 
         // reset for new data to come in
         self.literals_read = 0;
@@ -89,41 +147,6 @@ pub const Packager = struct {
         for (0..self.distance_frequencies.len) |i| {
             self.distance_frequencies[i] = 0;
         }
-    }
-
-    /// block type 00
-    fn storeUncompressed(self: *Packager, tokens: []model.LZToken, is_last: bool) !void {
-        const input_size = lengthOf(tokens);
-
-        if (input_size >= max_uncompressed_length) {
-            return error.BlockLengthExceeded;
-        }
-
-        const block_header: model.UncompressedBlockHeader = .{
-            .bfinal = is_last,
-            .len = input_size,
-            .nlen = ~input_size
-        };
-        var header_bytes: [5]u8 = @bitCast(block_header);
-        _ = try self.bit_writer.writeBytes(header_bytes[0..]);
-        
-        for (tokens) |token| {
-            if (token == .literal) {
-                _ = try self.bit_writer.writeBits(u8, token.literal);
-            } else {
-               // TODO write the length reference
-            }
-        }
-    }
-
-    fn lengthOf(tokens: []model.LZToken) u16 {
-        var length: u16 = 0;
-
-        for (tokens) |token| {
-            length += if (token == .literal) 1 else token.match.length;
-        }
-
-        return length;
     }
 
     /// block type 01
@@ -195,7 +218,9 @@ pub const Packager = struct {
         var repetitions: u16 = 0;
         var covered_symbols: u16 = 0;
 
+        // use a combined for loop for ll and distance code lengths
         for (1..total_ll_dist_symbols) |i| {
+            // get current symbol from ll or distance code lengths
             var new_code_length: u8 = 0;
             if (i < ll_codes_used) {
                 new_code_length = ll_code_lengths[i];
@@ -203,11 +228,12 @@ pub const Packager = struct {
                 new_code_length = distance_code_lengths[i - ll_codes_used];
             }
 
+            // same length, count repetition
             if (current_code_length == new_code_length) {
                 repetitions += 1;
             }
             
-            // new code_length or last element => construct cl_symbols
+            // different code_length or last element => construct cl_symbols
             if (current_code_length != new_code_length or i == (total_ll_dist_symbols - 1)) {
                 // non-zero code lengths
                 if (current_code_length > 0) {
@@ -250,7 +276,7 @@ pub const Packager = struct {
                     }
                     
                     repetitions = 0;
-                } else { // zero
+                } else { // zero code length
                     var zero_count = repetitions + 1;
                     while (zero_count >= 138) {
                         covered_symbols += 138;
