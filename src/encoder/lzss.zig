@@ -24,6 +24,8 @@ pub const LZSS = struct {
     processed_bytes: u64 = 0,
     search_index: usize = 2, // start at the 3rd symbol
 
+    match_ratio: f32 = 0, // running back reference ratio
+    low_depth_mode_counter: u8 = 0,
     candidate_depth_limit: u8 = max_candidate_depth,
     candidate_save_limit: u8 = max_candidates,
     best_candidate_index: u16 = 0,
@@ -61,21 +63,29 @@ pub const LZSS = struct {
             try self.process(literal);
         }
         
-        // check length to literal encoding ratio and adapt candidate search depth accordingly
-        const ratio = @as(f16, @floatFromInt(self.length_reference_counter)) / @as(f16, @floatFromInt(self.literal_colunter));
-        if (ratio < 0.01) {
+            // check length to literal encoding ratio and adapt candidate search depth accordingly
+            const ratio = @as(f32, @floatFromInt(self.length_reference_counter)) / @as(f32, @floatFromInt(self.literal_colunter));
+            self.match_ratio = self.match_ratio * 0.8 + ratio * 0.2;
+
+        if (self.low_depth_mode_counter >= 16) {
+            // prevent compressor from being locked in low depth mode
+            self.candidate_depth_limit = 4;
+            self.candidate_save_limit = 2;
+            self.low_depth_mode_counter = 0;
+        } else if (self.match_ratio < 0.01) {
+            self.low_depth_mode_counter += 1;
             self.candidate_depth_limit = 1;
             self.candidate_save_limit = 1;
-        } else if (ratio < 0.02) {
+        } else if (self.match_ratio < 0.02) {
             self.candidate_depth_limit = 2;
             self.candidate_save_limit = 2;
-        } else if (ratio < 0.05) {
+        } else if (self.match_ratio < 0.05) {
             self.candidate_depth_limit = 4;
             self.candidate_save_limit = 4;
-        } else if (ratio < 0.1) {
+        } else if (self.match_ratio < 0.1) {
             self.candidate_depth_limit = 8;
             self.candidate_save_limit = 8;
-        }  else if (ratio < 0.2) {
+        }  else if (self.match_ratio < 0.2) {
             self.candidate_depth_limit = 12;
             self.candidate_save_limit = 12;
         } else {
@@ -119,7 +129,7 @@ pub const LZSS = struct {
         var has_match = false;
 
         if (search_progress == 3) {
-            has_match = self.findCandidates(candidate_index.?, search_progress, search_buffer_index);
+            has_match = self.findCandidates(candidate_index.?, search_buffer_index);
         } else {
             // more than 3-byte search, check existing candidates
             for (0..self.candidates) |i| {
@@ -138,30 +148,25 @@ pub const LZSS = struct {
     }
     
     /// finds all candidates until either `candidate_depth` is reached or `max_candidates` are found
-    fn findCandidates(self: *LZSS, start_candidate_index: u64, search_progress: u16, search_buffer_index: u16) bool {
+    fn findCandidates(self: *LZSS, start_candidate_index: u64, search_buffer_index: u16) bool {
         var has_match = false;
         var candidate_depth: u8 = 0;
         var candidate_index: ?u64 = start_candidate_index;
         
         while (candidate_index) |idx| {
-            if (candidate_depth >= self.candidate_depth_limit) {
-                break;
-            }
-
             const global_dist = self.processed_bytes - idx;
             const buffer_idx: u16 = @intCast(idx & search_buffer_mask);
 
             // cache is outside the search_buffer => skip
             // cache is inside current search => skip
-            if (global_dist < max_lookback_distance and global_dist > search_progress) {
+            if (global_dist < max_lookback_distance and global_dist > 3) {
                 // check if the candidate matches
-                const matches = self.ring_buffer.matches(search_buffer_index, buffer_idx, search_progress);
+                const matches = self.ring_buffer.matches(search_buffer_index, buffer_idx, 3);
                 if (matches) {
-                    self.candidate_indices[self.candidates] = buffer_idx;
-                    self.candidates += 1;
-
                     has_match = true;
                     self.best_candidate_index = buffer_idx;
+                    self.candidate_indices[self.candidates] = buffer_idx;
+                    self.candidates += 1;
 
                     // we have enough candidates
                     if (self.candidates == self.candidate_save_limit) {
@@ -173,6 +178,10 @@ pub const LZSS = struct {
             // next candidate
             candidate_index = self.hash_prev[buffer_idx];
             candidate_depth += 1;
+
+            if (candidate_depth >= self.candidate_depth_limit) {
+                break;
+            }
         }
         
         return has_match;

@@ -30,11 +30,9 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
         }
 
         pub fn getTri(self: *Self, index: u16) u32 {
-            return @truncate(
-                @as(u32, self.buffer[index]) << 16 |
+            return  @as(u32, self.buffer[index]) << 16 |
                     @as(u32, self.buffer[index + 1]) << 8 |
-                    @as(u32, self.buffer[index + 2])
-            );
+                    @as(u32, self.buffer[index + 2]);
         }
 
         pub fn getDistance(self: *Self, index: u16) usize {
@@ -45,13 +43,10 @@ pub fn RingBuffer(comptime BUFFER_SIZE: usize) type {
 
             return BUFFER_SIZE - (index - self.current_pos);
         }
-
+        
         pub fn matches(self: *Self, index_a: u16, index_b: u16, length: u16) bool {
-            const slice_a = self.buffer[index_a..index_a + length];
-            const slice_b = self.buffer[index_b..index_b + length];
-
             for (0..length) |i| {
-                if (slice_a[i] != slice_b[i])
+                if (self.buffer[index_a + i] != self.buffer[index_b + i])
                     return false;
             }
            
